@@ -5,7 +5,7 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contr
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contracts/token/ERC20/utils/SafeERC20.sol";
 
 /**
- * @title ClimateOracle v5
+ * @title ClimateOracleBS v5
  * @notice Optimistic oracle for ClimatePool with bonded public challenges.
  *
  * v5 Changes from v4:
@@ -53,7 +53,7 @@ interface IClimatePool {
     function usdm() external view returns (address);
 }
 
-contract ClimateOracle {
+contract ClimateOracleBS {
     using SafeERC20 for IERC20;
 
     // ═══════════════════════════════════════════════

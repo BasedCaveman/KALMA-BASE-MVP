@@ -7,7 +7,7 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contr
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contracts/utils/Pausable.sol";
 
 /**
- * @title ClimatePool v5
+ * @title ClimatePoolBS v5
  * @notice Parimutuel climate prediction market with permissionless creation.
  *
  * v5 Changes from v4:
@@ -22,7 +22,7 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contr
  * Security: CEI, ReentrancyGuard, Pausable, 2-step ownership, pull-pattern fees.
  * Terminology: predict, Above/Below, position, participant, seed.
  */
-contract ClimatePool is ReentrancyGuard, Pausable {
+contract ClimatePoolBS is ReentrancyGuard, Pausable {
     using SafeERC20 for IERC20;
 
     // ═══════════════════════════════════════════════

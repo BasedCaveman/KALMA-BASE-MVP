@@ -12,17 +12,24 @@ Network:
 
 Deploy order for the hackathon MVP:
 
-1. `MarketTypeRegistry`
-2. `ClimatePool`
-3. `ClimateOracle`
+1. `MarketTypeRegistryBS`
+2. `ClimatePoolBS`
+3. `ClimateOracleBS`
 
 Constructor notes:
 
-- `MarketTypeRegistry()`
-- `ClimatePool(address usdc, address platformAddress, address climateFundAddress, address marketTypeRegistry)`
-- `ClimateOracle(address pool, address usdc)`
+- `MarketTypeRegistryBS()`
+- `ClimatePoolBS(address usdc, address platformAddress, address climateFundAddress, address marketTypeRegistry)`
+- `ClimateOracleBS(address pool, address usdc)`
 
-After deploying `ClimatePool`, deploy `ClimateOracle` with the pool address, then configure the pool to use the oracle if required by the selected contract version.
+Official Circle USDC on Base Sepolia:
+
+`0x036CbD53842c5426634e7929541eC2318f3dCF7e`
+
+USDC uses 6 decimals. Verify the balance and network in the explorer before
+funding the faucet.
+
+After deploying `ClimatePoolBS`, deploy `ClimateOracleBS` with the pool address, then call `ClimatePoolBS.setOracle(oracleAddress)` from the pool owner.
 
 The faucet amount and ETH drip must be reviewed before deployment so the claim
 flow matches the MVP: the ETH drip may be automatic, while test USDC is

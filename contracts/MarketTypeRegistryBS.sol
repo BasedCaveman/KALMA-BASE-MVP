@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 /**
- * @title MarketTypeRegistry
+ * @title MarketTypeRegistryBS
  * @notice Admin-managed registry of market types for ClimatePool.
  *
  * Allows adding new market types (snow, wind, humidity, etc.) without
@@ -14,7 +14,7 @@ pragma solidity ^0.8.20;
  *   3 = temp_low    (temperature_2m_min, °C)
  *   4 = snow        (snowfall_sum, cm)
  */
-contract MarketTypeRegistry {
+contract MarketTypeRegistryBS {
 
     struct MarketType {
         string name;
