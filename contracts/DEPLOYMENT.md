@@ -34,9 +34,14 @@ funding the faucet.
 Deployment addresses:
 
 - `MarketTypeRegistryBS`: `0xbE4D6EC834e786D272b7Ff8A90cEc969590499db`
-- `FaucetBS`: pending deployment
+- `FaucetBS`: `0x45176C683A245e84c9ee3f56242532031490a005`
 - `ClimatePoolBS`: `0x770a62F413B42B05B827F2beBe118d34B899f97D`
 - `ClimateOracleBS`: `0xf076af5EDDc6A14a3d879E77F743630574155298`
+
+After deployment, fund `FaucetBS` with Base Sepolia ETH for the `0.001 ETH`
+drip and transfer Base Sepolia USDC to it for the `100 USDC` test-credit
+claim. Test `dripEthFor(user)` first, then test `claimTestCredits()` from a
+user account.
 
 After deploying `ClimatePoolBS`, deploy `ClimateOracleBS` with the pool address, then call `ClimatePoolBS.setOracle(oracleAddress)` from the pool owner.
 
