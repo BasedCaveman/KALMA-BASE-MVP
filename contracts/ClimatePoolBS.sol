@@ -29,8 +29,10 @@ contract ClimatePoolBS is ReentrancyGuard, Pausable {
     // Constants
     // ═══════════════════════════════════════════════
 
-    uint256 public constant MIN_SEED = 10 * 1e18;
-    uint256 public constant MIN_POSITION = 1 * 1e18;
+    // Base Sepolia USDC uses 6 decimals.
+    uint256 public constant USDC_DECIMALS = 1e6;
+    uint256 public constant MIN_SEED = 10 * USDC_DECIMALS;
+    uint256 public constant MIN_POSITION = 1 * USDC_DECIMALS;
     uint256 public constant MAX_ACTIVE_MARKETS_PER_CREATOR = 5;
     uint256 public constant MIN_MARKET_DURATION = 1 hours;
     uint256 public constant MAX_MARKET_DURATION = 90 days;
@@ -75,7 +77,7 @@ contract ClimatePoolBS is ReentrancyGuard, Pausable {
     uint256 public climateFundBalance;
 
     uint256 public nextMarketId = 1;
-    uint256 public maxPoolSize = 100_000 * 1e18;
+    uint256 public maxPoolSize = 100_000 * USDC_DECIMALS;
 
     // Market type registry (external contract)
     address public marketTypeRegistry;
@@ -212,17 +214,17 @@ contract ClimatePoolBS is ReentrancyGuard, Pausable {
     // ═══════════════════════════════════════════════
 
     constructor(
-        address _usdm,
+        address _usdc,
         address _platformAddress,
         address _climateFundAddress,
         address _marketTypeRegistry
     ) {
-        if (_usdm == address(0)) revert ZeroAddress();
+        if (_usdc == address(0)) revert ZeroAddress();
         if (_platformAddress == address(0)) revert ZeroAddress();
         if (_climateFundAddress == address(0)) revert ZeroAddress();
         if (_marketTypeRegistry == address(0)) revert ZeroAddress();
 
-        usdm = IERC20(_usdm);
+        usdm = IERC20(_usdc);
         owner = msg.sender;
         platformAddress = _platformAddress;
         climateFundAddress = _climateFundAddress;

@@ -9,7 +9,7 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contr
  * @notice Optimistic oracle for ClimatePool with bonded public challenges.
  *
  * v5 Changes from v4:
- *   - BONDED CHALLENGES: Any user can challenge a resolution by posting CHALLENGE_BOND (50 USDm).
+ *   - BONDED CHALLENGES: Any user can challenge a resolution by posting CHALLENGE_BOND (50 USDC).
  *     This freezes the market and forces Guardian review.
  *     If challenge upheld (re-resolve): bond returned to challenger.
  *     If challenge rejected (confirm): bond sent to climate fund.
@@ -26,7 +26,7 @@ import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.0/contr
  *
  * Resolution Flow:
  *   1. Operator calls resolve() → 2h challenge window opens
- *   2. Anyone can challenge by posting 50 USDm bond → market frozen
+ *   2. Anyone can challenge by posting 50 USDC bond → market frozen
  *   3. Guardian reviews:
  *      a) Challenge upheld → reResolve() → bond returned to challenger
  *      b) Challenge rejected → confirmResolution() → bond to climate fund
@@ -62,7 +62,8 @@ contract ClimateOracleBS {
 
     uint256 public constant CHALLENGE_WINDOW = 2 hours;
     uint256 public constant MAX_ACTUAL_VALUE = 10000;
-    uint256 public constant CHALLENGE_BOND = 50 * 1e18;     // 50 USDm
+    uint256 public constant USDC_DECIMALS = 1e6;
+    uint256 public constant CHALLENGE_BOND = 50 * USDC_DECIMALS; // 50 USDC
 
     // ═══════════════════════════════════════════════
     // State
@@ -135,12 +136,12 @@ contract ClimateOracleBS {
     // Constructor
     // ═══════════════════════════════════════════════
 
-    constructor(address _pool, address _usdm) {
+    constructor(address _pool, address _usdc) {
         if (_pool == address(0)) revert ZeroAddress();
-        if (_usdm == address(0)) revert ZeroAddress();
+        if (_usdc == address(0)) revert ZeroAddress();
 
         pool = IClimatePool(_pool);
-        usdm = IERC20(_usdm);
+        usdm = IERC20(_usdc);
         owner = msg.sender;
         operator = msg.sender;
         guardian = msg.sender;
@@ -185,7 +186,7 @@ contract ClimateOracleBS {
      *         Freezes the market and forces Guardian review.
      *         Bond is returned if challenge is upheld (re-resolve),
      *         or sent to climate fund if rejected (confirm).
-     * @dev Caller must have approved CHALLENGE_BOND of USDm to this contract.
+     * @dev Caller must have approved CHALLENGE_BOND of USDC to this contract.
      */
     function challengeResolution(uint256 marketId) external {
         if (resolvedAt[marketId] == 0) revert NotResolved();
