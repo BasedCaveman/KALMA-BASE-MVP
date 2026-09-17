@@ -32,7 +32,7 @@ funding the faucet.
 Deployment addresses:
 
 - `MarketTypeRegistryBS`: `0xbE4D6EC834e786D272b7Ff8A90cEc969590499db`
-- `ClimatePoolBS`: pending deployment
+- `ClimatePoolBS`: `0xd9145CCE52D386f254917e481eB44e9943F39138`
 - `ClimateOracleBS`: pending deployment
 
 After deploying `ClimatePoolBS`, deploy `ClimateOracleBS` with the pool address, then call `ClimatePoolBS.setOracle(oracleAddress)` from the pool owner.
