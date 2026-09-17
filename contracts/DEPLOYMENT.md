@@ -35,7 +35,7 @@ Deployment addresses:
 
 - `MarketTypeRegistryBS`: `0xbE4D6EC834e786D272b7Ff8A90cEc969590499db`
 - `FaucetBS`: pending deployment
-- `ClimatePoolBS`: pending replacement deployment (previous address was created by the VM wallet)
+- `ClimatePoolBS`: `0x770a62F413B42B05B827F2beBe118d34B899f97D`
 - `ClimateOracleBS`: pending deployment
 
 After deploying `ClimatePoolBS`, deploy `ClimateOracleBS` with the pool address, then call `ClimatePoolBS.setOracle(oracleAddress)` from the pool owner.
