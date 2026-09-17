@@ -16,10 +16,6 @@ Deploy order for the hackathon MVP:
 2. `ClimatePool`
 3. `ClimateOracle`
 
-Deploy `MockUSDm` only if the team intentionally chooses a clearly labeled
-Kalma test token instead of the Base Sepolia USDC already available. It is not
-USDC and should not be used when configuring the production-like MVP flow.
-
 Constructor notes:
 
 - `MarketTypeRegistry()`
