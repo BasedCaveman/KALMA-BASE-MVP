@@ -29,6 +29,12 @@ Official Circle USDC on Base Sepolia:
 USDC uses 6 decimals. Verify the balance and network in the explorer before
 funding the faucet.
 
+Deployment addresses:
+
+- `MarketTypeRegistryBS`: `0xbE4D6EC834e786D272b7Ff8A90cEc969590499db`
+- `ClimatePoolBS`: pending deployment
+- `ClimateOracleBS`: pending deployment
+
 After deploying `ClimatePoolBS`, deploy `ClimateOracleBS` with the pool address, then call `ClimatePoolBS.setOracle(oracleAddress)` from the pool owner.
 
 The faucet amount and ETH drip must be reviewed before deployment so the claim
