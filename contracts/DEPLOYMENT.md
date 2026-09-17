@@ -12,12 +12,14 @@ Network:
 
 Deploy order for the hackathon MVP:
 
-1. `MarketTypeRegistryBS`
-2. `ClimatePoolBS`
-3. `ClimateOracleBS`
+1. `FaucetBS`
+2. `MarketTypeRegistryBS`
+3. `ClimatePoolBS`
+4. `ClimateOracleBS`
 
 Constructor notes:
 
+- `FaucetBS(address usdc, address initialOwner)`
 - `MarketTypeRegistryBS()`
 - `ClimatePoolBS(address usdc, address platformAddress, address climateFundAddress, address marketTypeRegistry)`
 - `ClimateOracleBS(address pool, address usdc)`
@@ -32,7 +34,8 @@ funding the faucet.
 Deployment addresses:
 
 - `MarketTypeRegistryBS`: `0xbE4D6EC834e786D272b7Ff8A90cEc969590499db`
-- `ClimatePoolBS`: `0xd9145CCE52D386f254917e481eB44e9943F39138`
+- `FaucetBS`: pending deployment
+- `ClimatePoolBS`: pending replacement deployment (previous address was created by the VM wallet)
 - `ClimateOracleBS`: pending deployment
 
 After deploying `ClimatePoolBS`, deploy `ClimateOracleBS` with the pool address, then call `ClimatePoolBS.setOracle(oracleAddress)` from the pool owner.
