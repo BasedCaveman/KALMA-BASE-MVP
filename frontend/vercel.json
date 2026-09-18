@@ -1,0 +1,37 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {
+      "path": "/api/cron/signal-engine",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/enrich-places",
+      "schedule": "20 4 * * *"
+    },
+    {
+      "path": "/api/cron/commodity-context",
+      "schedule": "30 21 * * *"
+    },
+    {
+      "path": "/api/cron/leaderboard",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/weather-news",
+      "schedule": "17 5 * * *"
+    },
+    {
+      "path": "/api/cron/inmet-alerts",
+      "schedule": "35 */3 * * *"
+    },
+    {
+      "path": "/api/cron/place-briefs",
+      "schedule": "40 6,18 * * *"
+    },
+    {
+      "path": "/api/cron/cre-shadow",
+      "schedule": "25 */2 * * *"
+    }
+  ]
+}

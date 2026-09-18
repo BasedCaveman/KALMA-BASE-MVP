@@ -1,0 +1,18 @@
+.env.local
+
+# Watchdog runtime logs (do not commit)
+watchdog-logs/
+.vercel
+
+# Local growth bot state (never commit)
+scripts/.growth-bot-ledger.json
+
+# X growth autopilot ledger (local only)
+scripts/growth/.x-autopilot-ledger.json
+scripts/growth/.x-discovered-accounts.json
+scripts/growth/x-discover.log
+scripts/growth/.x-discovered-oracle-accounts.json
+scripts/growth/x-discover-oracle.log
+# launchd StandardOutPath/StandardErrorPath target — recreated on each run,
+# so it never needs to be tracked (launchd creates it if missing).
+scripts/growth/x-autopilot.log
