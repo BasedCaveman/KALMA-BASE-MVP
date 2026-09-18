@@ -41,6 +41,7 @@
     "reel:brief": "node --env-file=.env.local scripts/social/brief-reel.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@privy-io/node": "^0.34.0",
     "@privy-io/react-auth": "3.40.0",
     "@privy-io/wagmi": "^4.0.10",

@@ -1,8 +1,8 @@
 import { isAddress, type Address } from 'viem';
 
-export const GAS_DRIP_CHAIN_ID = 6343;
+export const GAS_DRIP_CHAIN_ID = 84532;
 export const GAS_DRIP_MESSAGE_VERSION = '1';
-export const GAS_DRIP_DEFAULT_AMOUNT_ETH = '0.00002';
+export const GAS_DRIP_DEFAULT_AMOUNT_ETH = '0.001';
 export const GAS_DRIP_MIN_BALANCE_WEI = 5_000_000_000_000n; // 0.000005 ETH
 
 export type GasDripWalletKind = string;
