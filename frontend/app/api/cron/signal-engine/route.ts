@@ -30,6 +30,7 @@ import { effectiveValidUntil } from '@/lib/signal-engine/validity';
 import { refineAffectedGroups } from '@/lib/signal-engine/activity-profile';
 import { loadConfirmedCommunityGroups } from '@/lib/signal-engine/observation-activity';
 import { sanitizePlaceName } from '@/lib/server/place-name';
+import { getCacheStats, resetCacheStats } from '@/lib/signal-engine/cache';
 
 // This route hits Open-Meteo for every (place × type) combination — runs
 // long. Force Node runtime + extend the function timeout when on Pro.
@@ -54,6 +55,13 @@ function isAuthorized(req: NextRequest): boolean {
 
 async function runOnce(supabase: SupabaseClient) {
   const startedAt = Date.now();
+
+  // Counters are module-level (cache.ts) so evaluateSignal can record hits/
+  // misses without threading a counter through every call. Reset here so a
+  // warm Lambda reused across cron ticks doesn't carry over the last pass's
+  // numbers — see cache.ts for why the hit rate was silently zero before the
+  // DOY-tolerance fix, and why this number is worth watching.
+  resetCacheStats();
 
   // 1. Expire stale signals first — cheap, no Open-Meteo calls.
   const nowIso = new Date().toISOString();
@@ -87,7 +95,16 @@ async function runOnce(supabase: SupabaseClient) {
     .eq('active', true);
   if (placesErr) throw new Error(`load places: ${placesErr.message}`);
   if (!places || places.length === 0) {
-    return { created: 0, updated: 0, skipped: 0, errors: 0, expired: expiredCount ?? 0, elapsed_ms: Date.now() - startedAt, note: 'no active places' };
+    return {
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: 0,
+      expired: expiredCount ?? 0,
+      elapsed_ms: Date.now() - startedAt,
+      note: 'no active places',
+      historical_cache: getCacheStats(),
+    };
   }
 
   // 3. Load active signal types.
@@ -97,7 +114,16 @@ async function runOnce(supabase: SupabaseClient) {
     .eq('active', true);
   if (typesErr) throw new Error(`load signal types: ${typesErr.message}`);
   if (!signalTypes || signalTypes.length === 0) {
-    return { created: 0, updated: 0, skipped: 0, errors: 0, expired: expiredCount ?? 0, elapsed_ms: Date.now() - startedAt, note: 'no active signal types' };
+    return {
+      created: 0,
+      updated: 0,
+      skipped: 0,
+      errors: 0,
+      expired: expiredCount ?? 0,
+      elapsed_ms: Date.now() - startedAt,
+      note: 'no active signal types',
+      historical_cache: getCacheStats(),
+    };
   }
 
   // 3b. Load place activity profiles (written by /api/cron/enrich-places).
@@ -240,6 +266,12 @@ async function runOnce(supabase: SupabaseClient) {
     places_processed: placesProcessed,
     places_total: placeList.length,
     budget_hit: budgetHit,
+    // hits/misses/shiftedHits/hitRate for historical_cache this pass. Watch
+    // this after deploy: it was silently 0 before the DOY-tolerance fix in
+    // cache.ts (exact-match reads meant every request missed). Expected
+    // steady state at DOY_TOLERANCE=3 is a hit rate rising toward ~75% (each
+    // row now serves ~4 days instead of 1) — see cache.ts for the math.
+    historical_cache: getCacheStats(),
     elapsed_ms: Date.now() - startedAt,
     error_log: errorLog.slice(0, 20),
   };
