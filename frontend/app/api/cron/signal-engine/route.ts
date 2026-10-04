@@ -26,11 +26,12 @@ import {
   type SignalTypeDef,
   type CandidateSignal,
 } from '@/lib/signal-engine/evaluator';
+import { decideAndApply, type CronDecisionDeps } from '@/lib/signal-engine/cronDecision';
 import { effectiveValidUntil } from '@/lib/signal-engine/validity';
 import { refineAffectedGroups } from '@/lib/signal-engine/activity-profile';
 import { loadConfirmedCommunityGroups } from '@/lib/signal-engine/observation-activity';
 import { sanitizePlaceName } from '@/lib/server/place-name';
-import { getCacheStats, resetCacheStats } from '@/lib/signal-engine/cache';
+import { getSeriesCacheStats, resetSeriesCacheStats } from '@/lib/signal-engine/seriesCache';
 
 // This route hits Open-Meteo for every (place × type) combination — runs
 // long. Force Node runtime + extend the function timeout when on Pro.
@@ -56,12 +57,14 @@ function isAuthorized(req: NextRequest): boolean {
 async function runOnce(supabase: SupabaseClient) {
   const startedAt = Date.now();
 
-  // Counters are module-level (cache.ts) so evaluateSignal can record hits/
-  // misses without threading a counter through every call. Reset here so a
-  // warm Lambda reused across cron ticks doesn't carry over the last pass's
-  // numbers — see cache.ts for why the hit rate was silently zero before the
-  // DOY-tolerance fix, and why this number is worth watching.
-  resetCacheStats();
+  // Counters are module-level (seriesCache.ts) so evaluateSignal can record
+  // hits/misses without threading a counter through every call. Reset here
+  // so a warm Lambda reused across cron ticks doesn't carry over the last
+  // pass's numbers — see seriesCache.ts for why the hit rate was silently
+  // zero before the DOY-tolerance fix, and why this number is worth
+  // watching. cache.ts is now a thin adapter onto this same cache (see its
+  // own doc), so there is only one set of counters to reset.
+  resetSeriesCacheStats();
 
   // 1. Expire stale signals first — cheap, no Open-Meteo calls.
   const nowIso = new Date().toISOString();
@@ -103,7 +106,7 @@ async function runOnce(supabase: SupabaseClient) {
       expired: expiredCount ?? 0,
       elapsed_ms: Date.now() - startedAt,
       note: 'no active places',
-      historical_cache: getCacheStats(),
+      historical_series_cache: getSeriesCacheStats(),
     };
   }
 
@@ -122,7 +125,7 @@ async function runOnce(supabase: SupabaseClient) {
       expired: expiredCount ?? 0,
       elapsed_ms: Date.now() - startedAt,
       note: 'no active signal types',
-      historical_cache: getCacheStats(),
+      historical_series_cache: getSeriesCacheStats(),
     };
   }
 
@@ -162,6 +165,13 @@ async function runOnce(supabase: SupabaseClient) {
   let updated = 0;
   let skipped = 0;
   let errors = 0;
+  // Counted separately from `errors`: an evaluator couldn't tell whether
+  // the trigger fires (missing/incomplete data), as opposed to a genuine
+  // fetch/parse failure. Neither supersedes an existing active signal
+  // (see the catch block below), but conflating the two in one counter
+  // would hide a source that's persistently incomplete behind a number
+  // that looks like ordinary error noise. See review 2026-09-21, item 1.
+  let insufficientData = 0;
   const errorLog: Array<{ place: string; type: string; message: string }> = [];
 
   // Track how many (place, type) pairs no longer fire so we can supersede
@@ -177,45 +187,56 @@ async function runOnce(supabase: SupabaseClient) {
   // tolerates this concurrency; lower the env var if you ever get rate-limited.
   const CONCURRENCY = Math.max(1, Number(process.env.SIGNAL_ENGINE_CONCURRENCY ?? 6));
 
+  const cronDeps: CronDecisionDeps = {
+    evaluate: evaluateSignal,
+    // Ground the type-default groups in what this place actually does:
+    // the Wikipedia-derived profile drops crop groups the city doesn't
+    // have and adds documented ones; community-confirmed activities are
+    // then added on top (additive only, never subtractive).
+    refineGroups: (candidate, signalType) => {
+      candidate.affected_groups = refineAffectedGroups(
+        candidate.affected_groups,
+        activityProfiles.get(candidate.place_id) ?? null,
+        signalType.category,
+        undefined,
+        communityGroups.get(candidate.place_id) ?? null,
+      );
+    },
+    upsert: upsertSignal,
+  };
+
   async function processPlace(place: Place) {
-    const local = { created: 0, updated: 0, skipped: 0, errors: 0, superseded: 0 };
+    const local = { created: 0, updated: 0, skipped: 0, errors: 0, superseded: 0, insufficientData: 0 };
     for (const signalType of signalTypes as SignalTypeDef[]) {
-      try {
-        const candidate = await evaluateSignal(supabase, place, signalType);
-        if (!candidate) {
+      const outcome = await decideAndApply(supabase, place, signalType, cronDeps);
+      switch (outcome.kind) {
+        case 'created':
+          local.created += 1;
+          break;
+        case 'updated':
+          local.updated += 1;
+          break;
+        case 'skipped_duplicate':
           local.skipped += 1;
-          // "No longer fires" cleanup (Lima water_recovery case): supersede a
-          // still-active row whose firing conditions have stopped holding.
-          const { data: stale } = await supabase
-            .from('local_signals')
-            .update({ status: 'superseded' })
-            .eq('place_id', place.id)
-            .eq('signal_type_id', signalType.id)
-            .eq('status', 'active')
-            .select('id');
-          if (stale && stale.length > 0) local.superseded += stale.length;
-          continue;
-        }
-        // Ground the type-default groups in what this place actually does:
-        // the Wikipedia-derived profile drops crop groups the city doesn't
-        // have and adds documented ones; community-confirmed activities are
-        // then added on top (additive only, never subtractive).
-        candidate.affected_groups = refineAffectedGroups(
-          candidate.affected_groups,
-          activityProfiles.get(place.id) ?? null,
-          signalType.category,
-          undefined,
-          communityGroups.get(place.id) ?? null,
-        );
-        const result = await upsertSignal(supabase, candidate);
-        if (result === 'created') local.created += 1;
-        else if (result === 'updated') local.updated += 1;
-        else local.skipped += 1;
-      } catch (e) {
-        local.errors += 1;
-        const msg = e instanceof Error ? e.message : String(e);
-        errorLog.push({ place: place.slug, type: signalType.id, message: msg });
-        // Continue — one Open-Meteo failure shouldn't break the others.
+          break;
+        case 'no_crossing':
+          local.skipped += 1;
+          local.superseded += outcome.supersededCount;
+          break;
+        case 'insufficient_data':
+          // Expected, routine noise from an incomplete or thin upstream
+          // fetch — not touching any existing active signal is the whole
+          // point (decideAndApply makes no local_signals write for this
+          // outcome), and it's counted apart from `errors` so a source
+          // that's persistently incomplete for one place/type doesn't
+          // hide inside a number that reads as "something is broken".
+          local.insufficientData += 1;
+          break;
+        case 'error':
+          local.errors += 1;
+          errorLog.push({ place: place.slug, type: signalType.id, message: outcome.message });
+          // Continue — one Open-Meteo failure shouldn't break the others.
+          break;
       }
     }
     return local;
@@ -250,6 +271,7 @@ async function runOnce(supabase: SupabaseClient) {
       skipped += r.skipped;
       errors += r.errors;
       superseded += r.superseded;
+      insufficientData += r.insufficientData;
     }
     placesProcessed += chunk.length;
   }
@@ -259,6 +281,7 @@ async function runOnce(supabase: SupabaseClient) {
     updated,
     skipped,
     errors,
+    insufficient_data: insufficientData,
     expired: expiredCount ?? 0,
     superseded,
     promoted: promotedCount,
@@ -266,12 +289,14 @@ async function runOnce(supabase: SupabaseClient) {
     places_processed: placesProcessed,
     places_total: placeList.length,
     budget_hit: budgetHit,
-    // hits/misses/shiftedHits/hitRate for historical_cache this pass. Watch
-    // this after deploy: it was silently 0 before the DOY-tolerance fix in
-    // cache.ts (exact-match reads meant every request missed). Expected
-    // steady state at DOY_TOLERANCE=3 is a hit rate rising toward ~75% (each
-    // row now serves ~4 days instead of 1) — see cache.ts for the math.
-    historical_cache: getCacheStats(),
+    // hits/misses/shiftedHits/hitRate/upsertErrors for historical_series_cache
+    // this pass — every signal type's historical baseline now goes through
+    // this one cache (cache.ts is a thin adapter onto it; see its own doc).
+    // Watch this after deploy: it was silently 0 before the DOY-tolerance
+    // fix (exact-match reads meant every request missed). Expected steady
+    // state at DOY_TOLERANCE=3 is a hit rate rising toward ~75% (each row
+    // now serves ~4 days instead of 1) — see seriesCache.ts for the math.
+    historical_series_cache: getSeriesCacheStats(),
     elapsed_ms: Date.now() - startedAt,
     error_log: errorLog.slice(0, 20),
   };

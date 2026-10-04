@@ -34,6 +34,11 @@ export type SignalCard = {
   sources: string[]; // pretty source labels
   validFrom: string;
   validUntil: string;
+  /** When the engine evaluated this signal — distinct from validFrom
+   *  (the published window's start) and from whatever moment a consumer
+   *  (a brief, a page render) happens to read the row. Selected before
+   *  Lote 1 (2026-09-22) but dropped here rather than carried through. */
+  evaluatedAt: string;
   // Translation keys + interpolation values — UI looks these up
   titleKey: string;
   bodyKey: string;
@@ -120,6 +125,7 @@ export function composeCard(signal: StoredSignal): SignalCard {
     sources: (signal.source_stack ?? []).map((s) => SOURCE_LABELS[s] ?? s),
     validFrom: signal.valid_from,
     validUntil: signal.valid_until,
+    evaluatedAt: signal.evaluated_at,
     titleKey: meta.titleKey,
     bodyKey,
     // structured_data passed through as interpolation values for the body template

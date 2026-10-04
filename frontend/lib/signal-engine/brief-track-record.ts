@@ -1,3 +1,4 @@
+import { safeVerification } from './verification-contract.ts';
 // kalma/frontend/lib/signal-engine/brief-track-record.ts
 //
 // Per-place verification track record derived from place_briefs.
@@ -41,10 +42,7 @@ export type BriefTrackRecord = {
 };
 
 export const TRACK_RECORD_NOTE =
-  'Directional coverage, not a forecast accuracy grade: each check reports ' +
-  'whether the recorded day ran above, near, or below the place’s historical ' +
-  'baseline. It measures that Kalma checks its own record daily, not that a ' +
-  'prediction was “right”.';
+  'Daily observation coverage, not forecast accuracy. Directional counts include only compatible daily historical references with explicit method, window and sample metadata. Legacy or incompatible comparisons are withheld; recorded observations remain available.';
 
 /** Minimal shape we read from place_briefs. */
 type TrackRow = {
@@ -82,7 +80,7 @@ export function reduceTrackRecord(
     if (!latestVerified || row.brief_date > latestVerified) {
       latestVerified = row.brief_date;
     }
-    const checks = row.verification?.checks ?? [];
+    const checks = safeVerification(row.verification, row.brief_date)?.checks ?? [];
     for (const c of checks) {
       if (c.verdict === 'above_baseline') verdicts.above_baseline += 1;
       else if (c.verdict === 'near_baseline') verdicts.near_baseline += 1;
