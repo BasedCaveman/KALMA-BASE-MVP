@@ -15,6 +15,7 @@
 // Auth: same CRON_SECRET bearer/query pattern as the signal-engine cron.
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { climateJobBlockReason } from '@/lib/server/climate-job-role';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   composeBriefForPlace,
@@ -242,6 +243,8 @@ async function runOnce(supabase: SupabaseClient) {
 }
 
 export async function GET(req: NextRequest) {
+  const blocked = climateJobBlockReason(process.env);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }

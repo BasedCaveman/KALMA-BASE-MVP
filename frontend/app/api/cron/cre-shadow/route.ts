@@ -13,6 +13,7 @@
 // CRON_SECRET pattern as the other crons.
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { climateJobBlockReason } from '@/lib/server/climate-job-role';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { computeShadowResolution } from '@/lib/oracle-cre/shadow';
 import { CONTRACTS } from '@/lib/contracts';
@@ -49,6 +50,8 @@ type SnapshotRow = {
 };
 
 export async function GET(req: NextRequest) {
+  const blocked = climateJobBlockReason(process.env);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }

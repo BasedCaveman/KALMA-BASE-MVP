@@ -14,6 +14,7 @@
 // manual triggers.
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { climateJobBlockReason } from '@/lib/server/climate-job-role';
 import { createClient } from '@supabase/supabase-js';
 import { runCommodityContext } from '@/lib/signal-engine/commodity-context';
 
@@ -32,6 +33,8 @@ function isAuthorized(req: NextRequest): boolean {
 }
 
 export async function GET(req: NextRequest) {
+  const blocked = climateJobBlockReason(process.env);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }

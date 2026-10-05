@@ -19,6 +19,7 @@
 // Returns a summary JSON {created, updated, skipped, errors, elapsed_ms}.
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { climateJobBlockReason } from '@/lib/server/climate-job-role';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   evaluateSignal,
@@ -620,6 +621,8 @@ async function supersedePriors(
 // ── HTTP entrypoints ───────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+  const blocked = climateJobBlockReason(process.env);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   if (!isAuthorized(req)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }

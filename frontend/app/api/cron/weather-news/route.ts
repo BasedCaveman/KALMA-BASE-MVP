@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextResponse, type NextRequest } from 'next/server';
+import { climateJobBlockReason } from '@/lib/server/climate-job-role';
 import { runWeatherNewsDiscovery } from '@/lib/weather-news/discovery';
 
 export const runtime = 'nodejs';
@@ -14,6 +15,8 @@ function isAuthorized(request: NextRequest): boolean {
 }
 
 export async function GET(request: NextRequest) {
+  const blocked = climateJobBlockReason(process.env);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
