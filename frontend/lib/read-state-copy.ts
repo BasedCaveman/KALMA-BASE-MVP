@@ -4,11 +4,11 @@ export function readStateCopy(language: string) {
     loading: 'Carregando dados…',
     unavailable: 'Não foi possível carregar os dados. Tente novamente.',
     retry: 'Tentar novamente',
-    claimUnavailable: 'Créditos de teste indisponíveis para esta conta.',
+    claimUnavailable: 'Os créditos de teste não estão disponíveis no momento.',
   } : {
     loading: 'Loading data…',
     unavailable: 'Could not load the data. Please try again.',
     retry: 'Try again',
-    claimUnavailable: 'Test credits are unavailable for this account.',
+    claimUnavailable: 'Test credits are not available right now.',
   };
 }

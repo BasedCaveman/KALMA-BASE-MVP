@@ -150,7 +150,7 @@ function landingCopy(language: string): LandingStrings {
   const table: Record<string, LandingStrings> = {
     en: {
       eyebrowHero: 'Weather intelligence for real decisions',
-      heroTitle: "Not a forecast. What is unusual where you are.",
+      heroTitle: "More than a weather forecast. What deserves attention where it matters to you.",
       heroSub:
         "Every signal comes with what is normal for that place, who it usually affects, and what people there are seeing in the field today.",
       openKalma: "Open today's dashboard",
@@ -205,7 +205,7 @@ function landingCopy(language: string): LandingStrings {
     },
     pt: {
       eyebrowHero: 'Inteligência climática para decisões reais',
-      heroTitle: "Não é previsão do tempo. É o que está fora do normal no seu lugar.",
+      heroTitle: "Não é só previsão do tempo. É o que merece atenção onde importa para você.",
       heroSub:
         "Cada sinal vem com o que é normal naquele lugar, quem ele costuma atingir e o que as pessoas de lá estão vendo no campo hoje.",
       openKalma: 'Abrir o painel de hoje',
