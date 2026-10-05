@@ -9,6 +9,7 @@ import { useFaucet } from '@/hooks/useFaucet';
 import WalletErrorPanel from '@/components/shared/WalletErrorPanel';
 import { classifyWalletError } from '@/lib/wallet-errors';
 import { CHAIN } from '@/lib/contracts';
+import { readStateCopy } from '@/lib/read-state-copy';
 
 function faucetCopy(language: string) {
   const table: Record<string, Record<string, string>> = {
@@ -128,8 +129,10 @@ export default function FaucetBanner() {
 
   const {
     showBanner,
-    onCooldown,
-    cooldownSeconds,
+    claimUnavailable,
+    balanceStatus,
+    claimStatus,
+    refetchReads,
     claimFaucet,
     isPending,
     isGasDripping,
@@ -156,7 +159,10 @@ export default function FaucetBanner() {
     return key ? copy[key] ?? '' : '';
   }, [error, copy, errorKind]);
 
-  const needsAnything = showBanner || onCooldown;
+  const readsLoading = balanceStatus === 'loading' || claimStatus === 'loading';
+  const readsFailed = balanceStatus === 'error' || claimStatus === 'error';
+  const readCopy = readStateCopy(language);
+  const needsAnything = showBanner || claimUnavailable || readsLoading || readsFailed;
   if (!needsAnything) return null;
 
   const busy =
@@ -164,13 +170,6 @@ export default function FaucetBanner() {
     isPending ||
     isConfirming ||
     ['checking_gas', 'signing_gas', 'waiting_gas', 'requesting_cash', 'refreshing_cash'].includes(stage);
-
-  function formatCooldown(seconds: number) {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-  }
 
   const primaryButton: React.CSSProperties = {
     width: '100%',
@@ -279,11 +278,11 @@ export default function FaucetBanner() {
             color: C.text,
           }}
         >
-          {`${formatTokenBalance(usdmBalance)} USDC`}
+          {usdmBalance === undefined ? '—' : `${formatTokenBalance(usdmBalance)} USDC`}
         </div>
       </div>
 
-      {showBanner && !onCooldown ? (
+      {showBanner ? (
         <button
           type="button"
           onClick={claimFaucet}
@@ -298,9 +297,10 @@ export default function FaucetBanner() {
         </button>
       ) : null}
 
-      {onCooldown ? (
+      {claimUnavailable || readsLoading || readsFailed ? (
         <div style={{ ...statusBox, marginTop: 10 }}>
-          {copy.cooldown} {formatCooldown(cooldownSeconds)}.
+          {readsFailed ? readCopy.unavailable : readsLoading ? readCopy.loading : readCopy.claimUnavailable}
+          {readsFailed ? <button type="button" onClick={() => void refetchReads()}>{readCopy.retry}</button> : null}
         </div>
       ) : null}
 

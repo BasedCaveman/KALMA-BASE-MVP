@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAccount } from '@/hooks/useWallet';
 import { useReadContract, useReadContracts } from 'wagmi';
 import { formatUnits } from 'viem';
-import { CONTRACTS, climatePoolAbi, MARKET_TYPES } from '@/lib/contracts';
+import { CHAIN, CONTRACTS, climatePoolAbi, MARKET_TYPES } from '@/lib/contracts';
+import { marketReadStatus } from '@/lib/contract-read-state';
 import {
   deriveMarketUiState,
   getMarketStateLabel,
@@ -238,10 +239,11 @@ export function sortV5Markets(a: Market, b: Market) {
 
 export function useMarkets(
   location?: LocationContextValue | null,
-  opts?: { maxMarkets?: number },
+  opts?: { maxMarkets?: number; marketId?: bigint },
 ) {
   const { address } = useAccount();
   const maxMarkets = opts?.maxMarkets;
+  const requestedId = opts?.marketId;
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -274,6 +276,7 @@ export function useMarkets(
       : null;
 
   const countRead = useReadContract({
+    chainId: CHAIN.id,
     address: CONTRACTS.CLIMATE_POOL,
     abi: climatePoolAbi,
     functionName: 'nextMarketId',
@@ -293,13 +296,17 @@ export function useMarkets(
   // don't multicall every market through /api/Base Sepolia-rpc. Full surfaces
   // (browse, proximity sort) pass no cap and read all ids.
   const ids = useMemo(() => {
+    if (requestedId !== undefined) {
+      return requestedId > 0n && (countRead.data === undefined || requestedId < countRead.data) ? [requestedId] : [];
+    }
     const full = Array.from({ length: count }, (_, i) => BigInt(i + 1));
     return maxMarkets && full.length > maxMarkets ? full.slice(-maxMarkets) : full;
-  }, [count, maxMarkets]);
+  }, [count, maxMarkets, requestedId, countRead.data]);
 
   const marketContracts = useMemo(
     () =>
       ids.map((id) => ({
+        chainId: CHAIN.id,
         address: CONTRACTS.CLIMATE_POOL,
         abi: climatePoolAbi,
         functionName: 'getMarketV5' as const,
@@ -311,6 +318,7 @@ export function useMarkets(
   const statusContracts = useMemo(
     () =>
       ids.map((id) => ({
+        chainId: CHAIN.id,
         address: CONTRACTS.CLIMATE_POOL,
         abi: climatePoolAbi,
         functionName: 'getMarketStatus' as const,
@@ -322,6 +330,7 @@ export function useMarkets(
   const distributionContracts = useMemo(
     () =>
       ids.map((id) => ({
+        chainId: CHAIN.id,
         address: CONTRACTS.CLIMATE_POOL,
         abi: climatePoolAbi,
         functionName: 'getOdds' as const,
@@ -333,6 +342,7 @@ export function useMarkets(
   const participantContracts = useMemo(
     () =>
       ids.map((id) => ({
+        chainId: CHAIN.id,
         address: CONTRACTS.CLIMATE_POOL,
         abi: climatePoolAbi,
         functionName: 'getParticipantCount' as const,
@@ -344,6 +354,7 @@ export function useMarkets(
   const resolutionContracts = useMemo(
     () =>
       ids.map((id) => ({
+        chainId: CHAIN.id,
         address: CONTRACTS.CLIMATE_POOL,
         abi: climatePoolAbi,
         functionName: 'getResolutionDetails' as const,
@@ -355,6 +366,7 @@ export function useMarkets(
   const userPositionContracts = useMemo(() => {
     if (!address) return [];
     return ids.map((id) => ({
+      chainId: CHAIN.id,
       address: CONTRACTS.CLIMATE_POOL,
       abi: climatePoolAbi,
       functionName: 'getUserPosition' as const,
@@ -692,6 +704,7 @@ export function useMarkets(
   }
 
   return {
+    detailReadStatus: requestedId === undefined ? undefined : marketReadStatus(requestedId, countRead, [marketsRead, statusRead, distributionRead, participantsRead]),
     markets,
     primaryMarket,
     secondaryMarkets,

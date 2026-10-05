@@ -1221,7 +1221,7 @@ export default function CreatePage() {
     },
   });
 
-  const { data: browserUsdmBalance = 0n, refetch: refetchUsdmBalance } = useReadContract({
+  const { data: browserUsdmBalance, refetch: refetchUsdmBalance } = useReadContract({
     chainId: CHAIN.id,
     address: CONTRACTS.USDC,
     abi: usdcAbi,
@@ -1374,12 +1374,14 @@ export default function CreatePage() {
     }
   }, [seedAmount]);
 
-  const usdmBalance = faucetUsdmBalance > browserUsdmBalance ? faucetUsdmBalance : browserUsdmBalance;
+  const usdmBalance = faucetUsdmBalance === undefined ? browserUsdmBalance
+    : browserUsdmBalance === undefined ? faucetUsdmBalance
+    : faucetUsdmBalance > browserUsdmBalance ? faucetUsdmBalance : browserUsdmBalance;
   const effectiveAllowance = optimisticAllowance > allowance ? optimisticAllowance : allowance;
-  const parsedUsdmBalance = Number(formatUnits(usdmBalance, USDM_DECIMALS));
+  const parsedUsdmBalance = usdmBalance === undefined ? undefined : Number(formatUnits(usdmBalance, USDM_DECIMALS));
 
   const needsApproval = effectiveAllowance < seedAmountWei;
-  const hasEnoughCash = usdmBalance >= seedAmountWei;
+  const hasEnoughCash = usdmBalance !== undefined && usdmBalance >= seedAmountWei;
   const hasEnoughGas = (nativeBalance?.value ?? 0n) >= MIN_GAS_BUFFER;
 
   const hasValidDuration =
@@ -2943,7 +2945,7 @@ export default function CreatePage() {
           />
           <Row
             label={copy.balance}
-            value={formatLocal(parsedUsdmBalance)}
+            value={parsedUsdmBalance === undefined ? '—' : formatLocal(parsedUsdmBalance)}
             fonts={fonts}
             C={C}
           />
