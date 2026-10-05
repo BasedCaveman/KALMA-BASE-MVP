@@ -20,6 +20,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { applyValidityFilter } from '@/lib/signal-engine/validity';
 import {
   composeCard,
   type SignalCard,
@@ -157,10 +158,9 @@ async function fetchActiveSignalsWithPlaces() {
   // One round-trip: join local_signals → places. The cap must exceed the live
   // active count so no place is dropped before the client groups by region.
   const run = (withCommunity: boolean) =>
-    supabase
-      .from('local_signals')
-      .select(signalSelect(withCommunity))
-      .eq('status', 'active')
+    applyValidityFilter(
+      supabase.from('local_signals').select(signalSelect(withCommunity)),
+    )
       .order('evaluated_at', { ascending: false })
       .limit(ACTIVE_SIGNALS_FETCH_CAP);
 
@@ -389,10 +389,9 @@ export function useLocalSignalsByPlace(placeSlug: string | null | undefined) {
       }
 
       const runPlaceQuery = (withCommunity: boolean) =>
-        supabase
-          .from('local_signals')
-          .select(signalSelect(withCommunity))
-          .eq('status', 'active')
+        applyValidityFilter(
+          supabase.from('local_signals').select(signalSelect(withCommunity)),
+        )
           .eq('place_id', placeRow.id)
           .order('evaluated_at', { ascending: false });
 

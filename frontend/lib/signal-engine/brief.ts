@@ -26,6 +26,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchDailyActuals } from './brief-actuals';
 import { buildCompatibleChecks, safeVerification, COMPARISON_NOTE, type ComparisonContract, type WindowEvidence } from './verification-contract';
 import { composeCard, type StoredSignal } from './composer';
+import { applyValidityFilter } from './validity';
 import { resolveSignalString } from './i18n';
 import {
   eventsForProfile,
@@ -130,15 +131,13 @@ async function snapshotSignals(
   supabase: SupabaseClient,
   placeId: string,
 ): Promise<BriefSignal[]> {
-  const { data, error } = await supabase
-    .from('local_signals')
-    .select(
+  const { data, error } = await applyValidityFilter(
+    supabase.from('local_signals').select(
       `signal_type_id, status, severity, confidence, anomaly_score,
        affected_groups, source_stack, structured_data,
        valid_from, valid_until, evaluated_at, id, place_id`,
-    )
-    .eq('place_id', placeId)
-    .eq('status', 'active')
+    ).eq('place_id', placeId),
+  )
     .order('evaluated_at', { ascending: false });
   if (error) throw new Error(`signals snapshot: ${error.message}`);
 

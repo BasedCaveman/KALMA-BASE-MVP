@@ -43,6 +43,7 @@
     "test:cron-decision": "node scripts/test-cron-decision.mjs",
     "test:cache-model-identity": "node scripts/test-cache-model-identity.mjs",
     "test:verification-contract": "node scripts/test-verification-contract.mjs",
+    "test:validity-readers": "node scripts/test-validity-readers.mjs",
     "reel:brief": "node --env-file=.env.local scripts/social/brief-reel.mjs"
   },
   "dependencies": {

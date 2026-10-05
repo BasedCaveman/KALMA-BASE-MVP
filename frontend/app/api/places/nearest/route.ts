@@ -23,6 +23,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
+import { applyValidityFilter } from '@/lib/signal-engine/validity';
 
 export const runtime = 'nodejs';
 export const revalidate = 0;
@@ -94,11 +95,12 @@ export async function GET(req: NextRequest) {
   if (searchParams.get('withSignal') === '1' && places.length > 0) {
     const nearestId = (data ?? []).find((p) => p.slug === places[0].slug)?.id;
     if (nearestId) {
-      const { data: signals } = await supabase
-        .from('local_signals')
-        .select('signal_type_id, severity, structured_data')
-        .eq('place_id', nearestId)
-        .eq('status', 'active');
+      const { data: signals } = await applyValidityFilter(
+        supabase
+          .from('local_signals')
+          .select('signal_type_id, severity, structured_data')
+          .eq('place_id', nearestId),
+      );
       let best = -1;
       for (const s of signals ?? []) {
         const rank = SEVERITY_RANK[String(s.severity ?? '').toLowerCase()] ?? 0;

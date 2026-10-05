@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { applyValidityFilter } from '@/lib/signal-engine/validity';
 import { requireWalletAuth } from '@/lib/server/privy-auth';
 import { checkIpThrottle, getClientIp, hashIp } from '@/lib/ip-rate-limit';
 import {
@@ -59,11 +60,12 @@ async function loadContext(sb: Sb, slug: string) {
     .maybeSingle();
   if (!place?.id) return null;
 
-  const { data: signals } = await sb
-    .from('local_signals')
-    .select('signal_type_id, severity')
-    .eq('place_id', place.id)
-    .eq('status', 'active');
+  const { data: signals } = await applyValidityFilter(
+    sb
+      .from('local_signals')
+      .select('signal_type_id, severity')
+      .eq('place_id', place.id),
+  );
 
   // Lead signal = most severe, matching how the place page and the observation
   // ask choose. A question about the worst thing happening is the one worth
