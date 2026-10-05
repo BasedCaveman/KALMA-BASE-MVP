@@ -1,3 +1,4 @@
+import { safeVerification } from '@/lib/signal-engine/verification-contract';
 // kalma/frontend/app/api/places/[slug]/brief/route.ts
 //
 // GET /api/places/:slug/brief          → latest brief for the place
@@ -75,7 +76,7 @@ export async function GET(
         lat: place.lat,
         lon: place.lon,
       },
-      brief: data,
+      brief: { ...data, verification: safeVerification(data.verification, data.brief_date) },
       track_record: trackRecord,
       html_url: `${SITE_URL}/places/${place.slug}/briefs/${data.brief_date}`,
       archive_url: `${SITE_URL}/places/${place.slug}/briefs`,

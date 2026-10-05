@@ -6,10 +6,9 @@ const csp = [
   "default-src 'self'",
   [
     "connect-src 'self'",
-    // Base Sepolia RPCs (+ the kalma.me proxy, for cross-origin dev/preview testing
+    // Base Sepolia RPC (+ the kalma.me proxy, for cross-origin dev/preview testing
     // when NEXT_PUBLIC_MEGAETH_RPC_PROXY_URL points at the canonical proxy)
-    "https://carrot.Base Sepolia.com",
-    "https://timothy.Base Sepolia.com",
+    "https://sepolia.base.org",
     "https://kalma.me",
     // WalletConnect support used transitively by Privy's wallet login flow.
     "https://rpc.walletconnect.com",

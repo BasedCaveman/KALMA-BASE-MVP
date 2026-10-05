@@ -15,19 +15,97 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   fetchForecastDaily,
-  sumNext,
   avgNext,
-  rollingNDaySum,
+  ARCHIVE_MODEL,
   type DailyVariable,
 } from './openMeteoFetcher';
 import { getHistoricalBaseline } from './cache';
+import { getHistoricalSeries } from './seriesCache';
 import {
   percentileRank,
   anomalyScore,
   severityFromPercentile,
   computeConfidence,
+  rollingNDaySumByYear,
+  sumIfComplete,
+  extractCompleteWindow,
+  hasSufficientYearCoverage,
+  addDaysISO,
   type Severity,
 } from './percentile';
+
+/**
+ * Thrown instead of returning null when an evaluator could not actually
+ * evaluate the trigger — missing/incomplete data, insufficient historical
+ * coverage — as opposed to evaluating fully and finding no crossing.
+ *
+ * Why this matters: the cron (app/api/cron/signal-engine/route.ts)
+ * supersedes any existing active signal when evaluateSignal() returns
+ * null, on the theory that the firing condition stopped holding (the
+ * water_recovery/Lima case this was built for). That's only true for a
+ * real "evaluated, nothing crossed" outcome. A transient data gap
+ * returning null would wipe a genuinely still-active signal for a reason
+ * that has nothing to do with whether it's still true — found in review
+ * 2026-09-21 (docs/kalma-coordination-handover-2026-09-15/09-UI-HANDOVER-
+ * CLIMATE-INTEGRITY-2026-09-21.md, item 1) right after the completeness
+ * checks below were added, which made hitting this case far more likely
+ * than the pre-existing (also real, but rarer) `baseline.length < 30`
+ * case.
+ *
+ * The cron's existing per-place try/catch already does the right thing
+ * for a thrown error — log it, leave existing signals untouched, move on
+ * — so throwing this instead of returning null costs no new plumbing
+ * there; the cron only needs to count it separately from a genuine fetch
+ * failure for observability (see route.ts).
+ */
+export class InsufficientDataError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InsufficientDataError';
+  }
+}
+
+/**
+ * Bumped whenever the statistical METHOD behind a signal type changes
+ * (not its trigger_logic config, which already has its own history).
+ * Stored in structured_data so a shift in emitted signals after a code
+ * change reads as "method changed", never as "climate changed" or a
+ * silent rewrite of history — see review item 5.
+ */
+const ROLLING_SUM_METHOD_VERSION = 'rolling-sum-v2-anchor-lookback-2026-09-21';
+
+/**
+ * heat_stress_window and heavy_rain_event's percentile mode do NOT use a
+ * rolling sum — averaging and taking a single-day max are different
+ * aggregation methods, and reusing ROLLING_SUM_METHOD_VERSION for them
+ * (found in review, Lote 1 2026-09-22) would make a future rolling-sum-
+ * only change look like it also touched these two, or vice versa. Each
+ * method family gets its own version.
+ */
+const HEAT_STRESS_METHOD_VERSION = 'heat-stress-avg-v1-2026-09-22';
+const HEAVY_RAIN_PERCENTILE_METHOD_VERSION = 'heavy-rain-percentile-max-v1-2026-09-22';
+const HEAVY_RAIN_FIXED_METHOD_VERSION = 'heavy-rain-fixed-threshold-v1-2026-09-22';
+
+/**
+ * Names the forecast provider in structured_data without overclaiming a
+ * specific model: fetchForecastDaily (openMeteoFetcher.ts) does not pass a
+ * `models` param today, even though Open-Meteo's forecast endpoint accepts
+ * one — so "which forecast model" is genuinely unspecified, not ERA5 (that
+ * label is reserved for ARCHIVE_MODEL, the historical/reanalysis fetch,
+ * which is a different endpoint and a different kind of data). Conflating
+ * the two was a real defect in this batch's own first draft, caught before
+ * shipping.
+ */
+const FORECAST_SOURCE = 'open-meteo';
+
+/** Throws InsufficientDataError if hasSufficientYearCoverage() (percentile.ts) says no. */
+function requireSufficientYears(yearsRequested: number, yearsWithData: number): void {
+  if (!hasSufficientYearCoverage(yearsRequested, yearsWithData)) {
+    throw new InsufficientDataError(
+      `only ${yearsWithData}/${yearsRequested} historical years returned data (need >= ${Math.ceil(yearsRequested / 2)})`
+    );
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Absolute-value floors for percentile-based rainfall signals.
@@ -183,17 +261,37 @@ async function evalRainfallRisk(
   signalType: SignalTypeDef,
   now: Date
 ): Promise<CandidateSignal | null> {
-  // 1. Forecast: next 48h precipitation total
+  const ROLLING_WINDOW_DAYS = 2; // 48h
+
+  // 1. Forecast: next 48h precipitation total. Request EXACTLY
+  // ROLLING_WINDOW_DAYS days — a leftover `7` here (unused beyond the
+  // first 2 by the old sumNext()-based code) meant sumIfComplete() below,
+  // which validates the ENTIRE returned array length against
+  // ROLLING_WINDOW_DAYS, rejected a perfectly normal 7-day forecast as
+  // "incomplete" 100% of the time: it never had a chance to equal 2.
+  // Found in review 2026-09-21 (second round), reproduced against a
+  // forecast mock that (unlike the first version of this test) actually
+  // honors the requested forecast_days.
   const forecast = await fetchForecastDaily(
     place.latitude,
     place.longitude,
     ['precipitation_sum'],
-    7
+    ROLLING_WINDOW_DAYS
   );
-  const forecast48h = sumNext(forecast.values.precipitation_sum, 2);
+  const todayISO = now.toISOString().slice(0, 10);
+  const forecastResult = sumIfComplete(forecast.dates, forecast.values.precipitation_sum, todayISO, ROLLING_WINDOW_DAYS);
+  if (!forecastResult.complete) {
+    throw new InsufficientDataError(
+      `forecast did not return ${ROLLING_WINDOW_DAYS} complete consecutive days starting ${todayISO}`
+    );
+  }
+  const forecast48h = forecastResult.sum;
 
-  // 2. Historical baseline: daily precipitation across DOY window
-  const dailyBaseline = await getHistoricalBaseline(supabase, {
+  // 2. Historical baseline: dated daily precipitation across DOY window.
+  // rollingWindowDays = ROLLING_WINDOW_DAYS so every one of the
+  // 2*doy_half_window+1 candidate end-dates per year has a full 48h sum
+  // available (see fetchHistoricalSeries's doc).
+  const { series: dailySeries, yearsRequested } = await getHistoricalSeries(supabase, {
     placeId: place.id,
     latitude: place.latitude,
     longitude: place.longitude,
@@ -201,12 +299,17 @@ async function evalRainfallRisk(
     targetDate: now,
     yearsBack: signalType.trigger_logic.baseline_years,
     doyHalfWindow: signalType.trigger_logic.doy_half_window,
+    rollingWindowDays: ROLLING_WINDOW_DAYS,
   });
 
-  // 3. Build 48h rolling sums for fair comparison
-  const baseline48h = rollingNDaySum(dailyBaseline, 2);
+  // 3. Build 48h rolling sums for fair comparison — within-year, calendar-
+  // consecutive days only (see rollingNDaySumByYear's header).
+  const { sums: baseline48h, yearsWithUsableWindow } = rollingNDaySumByYear(dailySeries, ROLLING_WINDOW_DAYS);
+  requireSufficientYears(yearsRequested, yearsWithUsableWindow);
 
-  if (baseline48h.length < 30) return null;
+  if (baseline48h.length < 30) {
+    throw new InsufficientDataError(`only ${baseline48h.length} rolling 48h baseline samples (need >= 30)`);
+  }
 
   // Absolute-value floor — guards against the percentile-rank-of-near-zero
   // pitfall in arid climates. See evaluator.ts header comment for context.
@@ -239,11 +342,17 @@ async function evalRainfallRisk(
     source_stack: ['open-meteo'],
     structured_data: {
       forecast_48h_mm: round(forecast48h, 1),
+      forecast_window: { start: forecast.dates[0], end: forecast.dates[ROLLING_WINDOW_DAYS - 1] },
+      forecast_source: FORECAST_SOURCE,
+      historical_model: ARCHIVE_MODEL,
       baseline_median_mm: round(median(baseline48h), 1),
       baseline_p90_mm: round(quantile(baseline48h, 0.9), 1),
       percentile: round(pct, 0),
       sample_size: baseline48h.length,
       window: { years: signalType.trigger_logic.baseline_years, doy_half: signalType.trigger_logic.doy_half_window },
+      historical_years_requested: yearsRequested,
+      historical_years_with_usable_window: yearsWithUsableWindow,
+      method_version: ROLLING_SUM_METHOD_VERSION,
     },
     dedupe_key: dedupeKey,
     valid_from: validFrom.toISOString(),
@@ -268,11 +377,39 @@ async function evalHeatStress(
     ['temperature_2m_max', 'relative_humidity_2m_mean'],
     7
   );
-  const forecast7dMaxAvg = avgNext(forecast.values.temperature_2m_max, 7);
-  const forecast7dHumidityAvg = avgNext(forecast.values.relative_humidity_2m_mean, 7);
+  const todayISO = now.toISOString().slice(0, 10);
 
-  // Temperature baseline (DOY-windowed daily max temps)
-  const tempBaseline = await getHistoricalBaseline(supabase, {
+  // The forecast average used to run over whatever came back
+  // (avgNext, no completeness check) — a partial week could neither be
+  // trusted as a real 7-day average nor read as "nothing crossed" (the
+  // missing days could have been the hot ones). Require the full window
+  // for the PRIMARY ranked quantity, same discipline as every rolling-sum
+  // evaluator's forecast side. Found in review, Lote 1 2026-09-22.
+  const tempWindow = extractCompleteWindow(forecast.dates, forecast.values.temperature_2m_max, todayISO, 7);
+  if (!tempWindow) {
+    throw new InsufficientDataError(
+      `forecast did not return 7 complete consecutive days of temperature_2m_max starting ${todayISO}`
+    );
+  }
+  const forecast7dMaxAvg = tempWindow.reduce((a, b) => a + b, 0) / tempWindow.length;
+
+  // Humidity is a secondary COMPOUNDING input only (can downgrade severity,
+  // never block evaluation on its own) — deliberately not gated the same
+  // way as temperature. Still record whether the window was actually
+  // complete, so a partial/degraded reading is never indistinguishable
+  // from a genuine 7-day observation in structured_data.
+  const forecastHumidityWindow = extractCompleteWindow(forecast.dates, forecast.values.relative_humidity_2m_mean, todayISO, 7);
+  const forecast7dHumidityAvg = forecastHumidityWindow
+    ? forecastHumidityWindow.reduce((a, b) => a + b, 0) / forecastHumidityWindow.length
+    : avgNext(forecast.values.relative_humidity_2m_mean, 7);
+  const forecastHumidityCoverage: 'complete' | 'partial' = forecastHumidityWindow ? 'complete' : 'partial';
+
+  // Temperature baseline (DOY-windowed daily max temps). Same completeness
+  // discipline as the rolling-sum signal types (review 2026-09-21, round
+  // 6/7): years coverage first, then a raw sample-count floor — a year
+  // count alone doesn't catch a handful of real years padding out to 30+
+  // samples via multi-day DOY windows.
+  const tempResult = await getHistoricalBaseline(supabase, {
     placeId: place.id,
     latitude: place.latitude,
     longitude: place.longitude,
@@ -281,16 +418,23 @@ async function evalHeatStress(
     yearsBack: signalType.trigger_logic.baseline_years,
     doyHalfWindow: signalType.trigger_logic.doy_half_window,
   });
-
-  if (tempBaseline.length < 30) return null;
+  requireSufficientYears(tempResult.yearsRequested, tempResult.yearsWithUsableWindow);
+  const tempBaseline = tempResult.values;
+  if (tempBaseline.length < 30) {
+    throw new InsufficientDataError(`only ${tempBaseline.length} temperature baseline samples (need >= 30)`);
+  }
 
   const tempPct = percentileRank(forecast7dMaxAvg, tempBaseline);
   const tempSeverity = severityFromPercentile(tempPct, signalType.trigger_logic.thresholds);
   if (!tempSeverity) return null;
 
   // Compounding factor: humidity above local median amplifies the signal.
-  // Below median humidity, we downgrade by one tier (or kill it if already low).
-  const humidityBaseline = await getHistoricalBaseline(supabase, {
+  // Below median humidity, we downgrade by one tier (or kill it if already
+  // low). Humidity is a secondary compounding input with an existing
+  // graceful fallback for missing data (median 50 below) — unlike the
+  // primary temperature baseline above, thin humidity coverage does not
+  // block evaluation.
+  const humidityResult = await getHistoricalBaseline(supabase, {
     placeId: place.id,
     latitude: place.latitude,
     longitude: place.longitude,
@@ -299,6 +443,8 @@ async function evalHeatStress(
     yearsBack: signalType.trigger_logic.baseline_years,
     doyHalfWindow: signalType.trigger_logic.doy_half_window,
   });
+  const humidityBaseline = humidityResult.values;
+  const historicalHumidityCoverage: 'observed' | 'fallback' = humidityBaseline.length > 0 ? 'observed' : 'fallback';
   const humidityMedian = humidityBaseline.length > 0 ? median(humidityBaseline) : 50;
   const humidityHighEnough = forecast7dHumidityAvg >= humidityMedian;
 
@@ -328,12 +474,20 @@ async function evalHeatStress(
     structured_data: {
       forecast_7d_max_avg_c: round(forecast7dMaxAvg, 1),
       forecast_7d_humidity_avg: round(forecast7dHumidityAvg, 0),
+      forecast_window: { start: forecast.dates[0], end: forecast.dates[6] },
+      forecast_source: FORECAST_SOURCE,
+      forecast_humidity_coverage: forecastHumidityCoverage,
+      historical_model: ARCHIVE_MODEL,
+      historical_humidity_coverage: historicalHumidityCoverage,
       baseline_median_c: round(median(tempBaseline), 1),
       baseline_p90_c: round(quantile(tempBaseline, 0.9), 1),
       humidity_local_median: round(humidityMedian, 0),
       humidity_compound_amplifies: humidityHighEnough,
       percentile: round(tempPct, 0),
       sample_size: tempBaseline.length,
+      historical_years_requested: tempResult.yearsRequested,
+      historical_years_with_usable_window: tempResult.yearsWithUsableWindow,
+      method_version: HEAT_STRESS_METHOD_VERSION,
     },
     dedupe_key: dedupeKey,
     valid_from: validFrom.toISOString(),
@@ -347,29 +501,78 @@ async function evalHeatStress(
 // (positive signal — wet conditions returning)
 // ============================================================
 
+/**
+ * NOT the archive API's default. Open-Meteo's own default for
+ * archive-api.open-meteo.com is "Best Match", which blends ECMWF IFS
+ * (updates every 6h, no delay) for the most recent 1-10 days with ERA5/
+ * ERA5-Land further back — verified live 2026-09-21, the same request
+ * without `models` returns real values through today. openMeteoFetcher.ts
+ * requests `models=era5` explicitly on every archive call (this one and
+ * the historical baseline's), so the "recent" window here and the
+ * baseline it's compared against are the same kind of data throughout: a
+ * settled reanalysis with a real, documented "5 days delay", not a mix
+ * of near-real-time forecast-model output (which can still be revised
+ * once ERA5 replaces it) for whichever days happen to be recent. This
+ * constant is that documented delay, and getHistoricalSeries below is
+ * anchored to the date it actually produces (`recent.endDate`), not
+ * `now` — a 5-day-old reading must not compare against "today's season"
+ * as if it were current. See review 2026-09-21 (third round), item 3,
+ * and https://open-meteo.com/en/docs/historical-weather-api.
+ */
+const ARCHIVE_DATA_LAG_DAYS = 5;
+
 async function evalWaterRecovery(
   supabase: SupabaseClient,
   place: Place,
   signalType: SignalTypeDef,
   now: Date
 ): Promise<CandidateSignal | null> {
-  // Past 14 days of actual rainfall — fetch from archive ending today
-  const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const historical14d = await fetchPast14d(place.latitude, place.longitude, fourteenDaysAgo, now);
-  const recent14dSum = historical14d.reduce((a, b) => a + (b ?? 0), 0);
+  const RECENT_WINDOW_DAYS = 14;
 
-  // Baseline: 14-day rolling sums in DOY window
-  const dailyBaseline = await getHistoricalBaseline(supabase, {
+  // Past 14 complete days of actual rainfall, ending ARCHIVE_DATA_LAG_DAYS
+  // before now (see its doc) — not "yesterday", and not now itself. The
+  // old range (now-14d .. now inclusive) was also 15 dates, not 14,
+  // comparing a mismatched window against a 14-day historical baseline.
+  const recent = await fetchRecentNDaySum(place.latitude, place.longitude, now, RECENT_WINDOW_DAYS);
+  if (!recent.complete) {
+    throw new InsufficientDataError(
+      `recent ${RECENT_WINDOW_DAYS}-day window is not complete for any end date from ` +
+        `${ARCHIVE_DATA_LAG_DAYS}d to ${ARCHIVE_DATA_LAG_DAYS + MAX_EXTRA_LAG_DAYS}d before now`
+    );
+  }
+  const recent14dSum = recent.sum;
+
+  // Baseline: 14-day rolling sums in a DOY window CENTRED ON THE RECENT
+  // WINDOW'S OWN END DATE (recent.endDate), not `now`. The recent
+  // observation already ends ARCHIVE_DATA_LAG_DAYS in the past — anchoring
+  // the "is this unusual for the season" comparison on today's
+  // day-of-year instead of the actual observed date would silently
+  // compare against the wrong slice of the calendar, worse the further
+  // doy_half_window is from ARCHIVE_DATA_LAG_DAYS. Found in review
+  // 2026-09-21 (third round), item 3.
+  //
+  // rollingWindowDays = RECENT_WINDOW_DAYS so every one of the
+  // 2*doy_half_window+1 candidate end-dates per year has a full 14-day
+  // sum available — without it, baseline_years=10 & doy_half_window=7
+  // (the production config) yields only 20 rolling sums, under the
+  // 30-sample floor below, and this signal type could never fire.
+  const baselineAnchorDate = new Date(`${recent.endDate}T00:00:00Z`);
+  const { series: dailySeries, yearsRequested } = await getHistoricalSeries(supabase, {
     placeId: place.id,
     latitude: place.latitude,
     longitude: place.longitude,
     variable: 'precipitation_sum',
-    targetDate: now,
+    targetDate: baselineAnchorDate,
     yearsBack: signalType.trigger_logic.baseline_years,
     doyHalfWindow: signalType.trigger_logic.doy_half_window,
+    rollingWindowDays: RECENT_WINDOW_DAYS,
   });
-  const baseline14d = rollingNDaySum(dailyBaseline, 14);
-  if (baseline14d.length < 30) return null;
+
+  const { sums: baseline14d, yearsWithUsableWindow } = rollingNDaySumByYear(dailySeries, RECENT_WINDOW_DAYS);
+  requireSufficientYears(yearsRequested, yearsWithUsableWindow);
+  if (baseline14d.length < 30) {
+    throw new InsufficientDataError(`only ${baseline14d.length} rolling 14d baseline samples (need >= 30)`);
+  }
 
   // Absolute-value floor — Lima example: 0.9mm of recent 14-day rain
   // landed at the 90th+ percentile against a near-zero baseline and
@@ -400,10 +603,18 @@ async function evalWaterRecovery(
     source_stack: ['open-meteo'],
     structured_data: {
       recent_14d_sum_mm: round(recent14dSum, 1),
+      recent_window: { start: recent.startDate, end: recent.endDate, lag_days_from_now: recent.lagDaysUsed },
+      // No forecast_source: this signal never fetches a forecast — both
+      // the "recent" window and the baseline come from the archive
+      // (ARCHIVE_MODEL). Lote 1, 2026-09-22.
+      historical_model: ARCHIVE_MODEL,
       baseline_median_mm: round(median(baseline14d), 1),
       baseline_p75_mm: round(quantile(baseline14d, 0.75), 1),
       percentile: round(pct, 0),
       sample_size: baseline14d.length,
+      historical_years_requested: yearsRequested,
+      historical_years_with_usable_window: yearsWithUsableWindow,
+      method_version: ROLLING_SUM_METHOD_VERSION,
     },
     dedupe_key: dedupeKey,
     valid_from: validFrom.toISOString(),
@@ -415,17 +626,84 @@ async function evalWaterRecovery(
 // helpers
 // ============================================================
 
-async function fetchPast14d(lat: number, lon: number, start: Date, end: Date): Promise<number[]> {
+/**
+ * How many extra days beyond ARCHIVE_DATA_LAG_DAYS this looks further back
+ * for a complete window before giving up. ERA5's "5 days delay" is
+ * typical, not guaranteed: review 2026-09-21 (fifth round) found a live
+ * place (Perdoes) where the D-5 window was genuinely null while D-6 was
+ * fully populated — a fixed D-5 request threw InsufficientDataError even
+ * though a real, complete, more-recent-than-baseline observation existed.
+ * This never fills the gap inside D-5's window; it only tries a wholly
+ * different, wholly complete window ending one or more days earlier, up
+ * to this bound, and reports the actual lag used (structured_data.
+ * recent_window.lag_days_from_now) so an unusually stale read is visible
+ * rather than silently indistinguishable from a normal one.
+ */
+const MAX_EXTRA_LAG_DAYS = 3;
+
+/**
+ * Sum of the last `n` COMPLETE calendar days of rain, ending at the most
+ * recent date (from ARCHIVE_DATA_LAG_DAYS to ARCHIVE_DATA_LAG_DAYS +
+ * MAX_EXTRA_LAG_DAYS before now) for which a full n-day window is
+ * actually complete. `now` itself is never a candidate end date: today's
+ * archive entry is routinely null (the source hasn't finished the day
+ * yet). Returns `complete: false` (and no fabricated sum) if every
+ * candidate window within the bound has a missing or non-numeric day,
+ * rather than folding a gap into 0mm.
+ */
+async function fetchRecentNDaySum(
+  lat: number,
+  lon: number,
+  now: Date,
+  n: number
+): Promise<{ sum: number; complete: boolean; startDate: string; endDate: string; lagDaysUsed: number }> {
+  const latestPossibleEnd = new Date(now.getTime() - ARCHIVE_DATA_LAG_DAYS * 24 * 60 * 60 * 1000);
+  const earliestPossibleEnd = new Date(latestPossibleEnd.getTime() - MAX_EXTRA_LAG_DAYS * 24 * 60 * 60 * 1000);
+  const fetchStart = new Date(earliestPossibleEnd.getTime() - (n - 1) * 24 * 60 * 60 * 1000);
+  const fetchStartDate = fetchStart.toISOString().slice(0, 10);
+  const fetchEndDate = latestPossibleEnd.toISOString().slice(0, 10);
+  // models=era5, not the archive API's Best Match default — see
+  // ARCHIVE_DATA_LAG_DAYS's doc for why the recent window and the
+  // historical baseline must be the same kind of data.
   const url =
     `https://archive-api.open-meteo.com/v1/archive?` +
     `latitude=${lat}&longitude=${lon}` +
-    `&start_date=${start.toISOString().slice(0, 10)}` +
-    `&end_date=${end.toISOString().slice(0, 10)}` +
-    `&daily=precipitation_sum&timezone=UTC`;
+    `&start_date=${fetchStartDate}` +
+    `&end_date=${fetchEndDate}` +
+    `&daily=precipitation_sum&timezone=UTC&models=era5`;
   const res = await fetch(url, { headers: { 'User-Agent': 'kalma-signal-engine/0.1' } });
   if (!res.ok) throw new Error(`Open-Meteo archive ${res.status}`);
   const data = await res.json();
-  return data?.daily?.precipitation_sum ?? [];
+  const dates: string[] = data?.daily?.time ?? [];
+  const values: unknown[] = data?.daily?.precipitation_sum ?? [];
+
+  // Walk backward from the latest possible end date, trying the most
+  // recent n-day window first and then progressively earlier ones.
+  // sumIfComplete still validates each candidate window's own dates and
+  // values as an exact consecutive run — this only changes WHICH window
+  // is tried, never how "complete" is judged.
+  for (let k = 0; k <= MAX_EXTRA_LAG_DAYS; k++) {
+    const candidateEndDate = addDaysISO(fetchEndDate, -k);
+    const candidateStartDate = addDaysISO(candidateEndDate, -(n - 1));
+    const startIdx = dates.indexOf(candidateStartDate);
+    if (startIdx === -1 || startIdx + n > dates.length) continue;
+    const result = sumIfComplete(
+      dates.slice(startIdx, startIdx + n),
+      values.slice(startIdx, startIdx + n),
+      candidateStartDate,
+      n
+    );
+    if (result.complete) {
+      return { ...result, startDate: candidateStartDate, endDate: candidateEndDate, lagDaysUsed: ARCHIVE_DATA_LAG_DAYS + k };
+    }
+  }
+  return {
+    sum: 0,
+    complete: false,
+    startDate: addDaysISO(fetchEndDate, -(n - 1)),
+    endDate: fetchEndDate,
+    lagDaysUsed: ARCHIVE_DATA_LAG_DAYS,
+  };
 }
 
 function median(sortedAsc: number[]): number {
@@ -722,41 +1000,54 @@ async function evalHeavyRain(
     ['precipitation_sum'],
     7
   );
-  const precip = forecast.values.precipitation_sum ?? [];
-  if (precip.length === 0) return null;
+  const todayISO = now.toISOString().slice(0, 10);
 
-  // Find the wettest forecast day
-  let wettestIdx = -1;
-  let wettestValue = -Infinity;
-  for (let i = 0; i < precip.length; i++) {
-    const v = precip[i];
-    if (v === null || v === undefined || !Number.isFinite(v)) continue;
-    if ((v as number) > wettestValue) {
-      wettestValue = v as number;
-      wettestIdx = i;
-    }
+  // Require the full 7-day window in BOTH modes (fixed and percentile both
+  // use this forecast). A partial week can neither be trusted to contain
+  // the actual wettest day (it may be one of the missing ones) nor be read
+  // as "no heavy rain" — the old code silently maxed/searched over
+  // whatever came back, treating a gap as if it just wasn't there. Found
+  // in review, Lote 1 2026-09-22.
+  const precipWindow = extractCompleteWindow(forecast.dates, forecast.values.precipitation_sum, todayISO, 7);
+  if (!precipWindow) {
+    throw new InsufficientDataError(
+      `forecast did not return 7 complete consecutive days of precipitation_sum starting ${todayISO}`
+    );
   }
-  if (wettestIdx === -1) return null;
+
+  let wettestIdx = 0;
+  for (let i = 1; i < precipWindow.length; i++) {
+    if (precipWindow[i] > precipWindow[wettestIdx]) wettestIdx = i;
+  }
+  const wettestValue = precipWindow[wettestIdx];
 
   let severity: Severity | 'active' | 'strong' | null = null;
   const meta: Record<string, any> = {
     threshold_mode: mode,
     wettest_forecast_mm: round(wettestValue, 1),
-    wettest_forecast_date: forecast.dates[wettestIdx] ?? null,
-    forecast_horizon_days: precip.length,
+    wettest_forecast_date: forecast.dates[wettestIdx],
+    forecast_window: { start: forecast.dates[0], end: forecast.dates[6] },
+    forecast_source: FORECAST_SOURCE,
   };
 
   if (mode === 'fixed') {
     const thresholdMm = Number(params.threshold_mm ?? 25);
     meta.threshold_mm = thresholdMm;
+    meta.method_version = HEAVY_RAIN_FIXED_METHOD_VERSION;
+    // Fixed mode never consults a historical baseline — historical_model
+    // and coverage fields are deliberately absent here, not zero/null-
+    // as-if-checked (Lote 1 2026-09-22).
     if (wettestValue >= thresholdMm) {
       // No graded severity in fixed mode — treat as 'high' for visibility,
       // or downgrade to 'medium' if just over threshold by <20%.
       severity = wettestValue >= thresholdMm * 1.2 ? 'high' : 'medium';
     }
   } else {
-    // percentile mode — compare against local DOY-window historical p75/90/95/99
-    const dailyBaseline = await getHistoricalBaseline(supabase, {
+    // percentile mode — compare against local DOY-window historical
+    // p75/90/95/99. Same completeness discipline as the rolling-sum signal
+    // types (review 2026-09-21, round 6/7): years coverage first, then a
+    // raw sample-count floor.
+    const dailyResult = await getHistoricalBaseline(supabase, {
       placeId: place.id,
       latitude: place.latitude,
       longitude: place.longitude,
@@ -765,7 +1056,11 @@ async function evalHeavyRain(
       yearsBack: signalType.trigger_logic.baseline_years,
       doyHalfWindow: signalType.trigger_logic.doy_half_window,
     });
-    if (dailyBaseline.length < 30) return null;
+    requireSufficientYears(dailyResult.yearsRequested, dailyResult.yearsWithUsableWindow);
+    const dailyBaseline = dailyResult.values;
+    if (dailyBaseline.length < 30) {
+      throw new InsufficientDataError(`only ${dailyBaseline.length} precipitation baseline samples (need >= 30)`);
+    }
 
     // Absolute-value floor — same percentile-vs-near-zero pitfall as
     // rainfall_risk_rising and water_recovery_signal. A 3mm day in a
@@ -780,6 +1075,19 @@ async function evalHeavyRain(
     meta.baseline_p95_mm = round(quantile(dailyBaseline, 0.95), 1);
     meta.baseline_p99_mm = round(quantile(dailyBaseline, 0.99), 1);
     meta.sample_size = dailyBaseline.length;
+    meta.historical_model = ARCHIVE_MODEL;
+    meta.historical_years_requested = dailyResult.yearsRequested;
+    meta.historical_years_with_usable_window = dailyResult.yearsWithUsableWindow;
+    meta.method_version = HEAVY_RAIN_PERCENTILE_METHOD_VERSION;
+
+    // Keep the nominal registry reference distinct from severity buckets
+    // and the absolute amount floor. This descriptive P95 does not add a
+    // second activation gate; preserve the existing scientific calibration.
+    meta.registry_reference_percentile = Number(params.percentile ?? 95);
+    meta.registry_reference_is_activation_floor = false;
+    meta.activation_rule = 'severity-percentile-buckets-and-absolute-mm-floor';
+    meta.severity_percentile_thresholds = { ...signalType.trigger_logic.thresholds };
+    meta.activation_minimum_mm = MIN_HEAVY_RAIN_SINGLE_DAY_MM;
 
     // thresholds map for heavy_rain_event is percentile cutoffs
     severity = severityFromPercentile(pct, signalType.trigger_logic.thresholds);

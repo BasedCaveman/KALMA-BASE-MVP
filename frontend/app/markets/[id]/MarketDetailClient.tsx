@@ -27,6 +27,7 @@ import {
 } from '@/lib/contracts';
 import { RECEIPT_POLL_INTERVAL_MS } from '@/lib/chain';
 import { useMarkets } from '@/hooks/useMarkets';
+import { readStateCopy } from '@/lib/read-state-copy';
 import { marketQuestion } from '@/lib/market-question';
 import { useUnits } from '@/lib/units-context';
 import { formatThreshold, thresholdTemp, thresholdPrecip, type UnitSystem } from '@/lib/units';
@@ -574,7 +575,7 @@ export default function MarketDetailPage() {
   const copy = pageCopy(language);
 
   const { location } = useLocationContext();
-  const { markets, isLoading, refetchAll } = useMarkets(location);
+  const { markets, detailReadStatus, refetchAll } = useMarkets(location, { marketId });
   const market = markets.find((m) => m.id === marketId);
 
   const { address, isConnected } = useAccount();
@@ -852,7 +853,7 @@ export default function MarketDetailPage() {
     [],
   );
 
-  if (isLoading) {
+  if (detailReadStatus === 'loading') {
     return (
       <div style={{ paddingBottom: 'var(--k-mobile-bottom-clearance)' }}>
         <AppHeader section={copy.question} />
@@ -869,7 +870,10 @@ export default function MarketDetailPage() {
       <div style={{ paddingBottom: 'var(--k-mobile-bottom-clearance)' }}>
         <AppHeader section={copy.question} />
         <div style={{ padding: '0 16px' }}>
-          <div style={panel(neu, R, fonts, C)}>{copy.notFound}</div>
+          <div style={panel(neu, R, fonts, C)}>
+            {detailReadStatus === 'not_found' ? copy.notFound : readStateCopy(language).unavailable}
+            {detailReadStatus !== 'not_found' ? <button type="button" onClick={() => void refetchAll()}>{readStateCopy(language).retry}</button> : null}
+          </div>
           <Link href="/markets" style={backLink(fonts, C)}>
             {copy.backToMarkets}
           </Link>

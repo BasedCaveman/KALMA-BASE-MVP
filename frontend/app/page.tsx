@@ -14,6 +14,7 @@
 
 import { supabase } from '@/lib/supabase';
 import { serializeJsonLd } from '@/lib/json-ld';
+import { applyValidityFilter } from '@/lib/signal-engine/validity';
 import LandingContent from '@/components/landing/LandingContent';
 
 // ISR — re-render every 15 min so the live-signals teaser stays fresh
@@ -34,12 +35,11 @@ type SignalTeaser = {
 
 async function fetchSignalsTeaser(): Promise<SignalTeaser[]> {
   try {
-    const { data, error } = await supabase
-      .from('local_signals')
-      .select(
+    const { data, error } = await applyValidityFilter(
+      supabase.from('local_signals').select(
         `id, signal_type_id, severity, places ( name, region, country, slug )`
-      )
-      .eq('status', 'active')
+      ),
+    )
       .order('evaluated_at', { ascending: false })
       .limit(6);
     if (error || !data) return [];
@@ -65,10 +65,9 @@ async function fetchSignalsTeaser(): Promise<SignalTeaser[]> {
 
 async function countActiveSignals(): Promise<number> {
   try {
-    const { count } = await supabase
-      .from('local_signals')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'active');
+    const { count } = await applyValidityFilter(
+      supabase.from('local_signals').select('id', { count: 'exact', head: true }),
+    );
     return count ?? 0;
   } catch {
     return 0;
@@ -95,10 +94,11 @@ async function countLiveAlerts(): Promise<number> {
 async function fetchGlobalLead() {
   const RANK: Record<string, number> = { extreme: 4, high: 3, medium: 2, moderate: 2, low: 1 };
   try {
-    const { data } = await supabase
-      .from('local_signals')
-      .select('signal_type_id, severity, structured_data, places ( name, slug )')
-      .eq('status', 'active')
+    const { data } = await applyValidityFilter(
+      supabase
+        .from('local_signals')
+        .select('signal_type_id, severity, structured_data, places ( name, slug )'),
+    )
       .order('evaluated_at', { ascending: false })
       .limit(60);
     let best: any = null;

@@ -15,6 +15,7 @@
 // Auth + service-role client mirror app/api/cron/signal-engine/route.ts.
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { climateJobBlockReason } from '@/lib/server/climate-job-role';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createPublicClient, http, parseAbiItem, type Address } from 'viem';
 import { baseSepolia } from '@/lib/chain';
@@ -413,6 +414,8 @@ async function runIndex(supabase: SupabaseClient) {
 }
 
 async function handle(req: NextRequest) {
+  const blocked = climateJobBlockReason(process.env);
+  if (blocked) return NextResponse.json({ error: blocked }, { status: 403 });
   if (!isAuthorized(req)) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   const supabase = getSupabaseAdmin();
   if (!supabase) return NextResponse.json({ error: 'supabase_not_configured' }, { status: 503 });

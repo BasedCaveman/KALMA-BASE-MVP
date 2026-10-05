@@ -13,6 +13,7 @@ import BottomNav from '@/components/design/BottomNav';
 import AppHeader from '@/components/shared/AppHeader';
 import { CreatorEarningsPanel } from '@/components/shared/CreatorEarningsPanel';
 import { useFaucet } from '@/hooks/useFaucet';
+import { readStateCopy } from '@/lib/read-state-copy';
 import { useLocationContext } from '@/hooks/useLocationContext';
 import LocationPicker from '@/components/location/LocationPicker';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -666,8 +667,10 @@ export default function ProfilePage() {
 
   const {
     showBanner,
-    onCooldown,
-    cooldownSeconds,
+    claimUnavailable,
+    balanceStatus,
+    claimStatus,
+    refetchReads,
     claimFaucet,
     isPending,
     isGasDripping,
@@ -854,10 +857,13 @@ export default function ProfilePage() {
           ? '/positions'
           : '/markets';
 
-  const usdmValue = Number(formatUnits(usdmBalance, USDM_DECIMALS));
+  const usdmValue = usdmBalance === undefined ? undefined : Number(formatUnits(usdmBalance, USDM_DECIMALS));
+  const readCopy = readStateCopy(language);
+  const readsFailed = balanceStatus === 'error' || claimStatus === 'error';
+  const readsLoading = balanceStatus === 'loading' || claimStatus === 'loading';
   const isUSD = currencyCode === 'USD';
   const needsExternalWalletForTx = false;
-  const needsTestCash = isConnected && usdmBalance <= 0n;
+  const needsTestCash = isConnected && usdmBalance === 0n;
   const depositBusy =
     isGasDripping ||
     isPending ||
@@ -869,12 +875,6 @@ export default function ProfilePage() {
       : faucetStage === 'requesting_cash' || faucetStage === 'refreshing_cash'
         ? copy.gettingCash
         : copy.deposit;
-
-  const formatCooldown = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return h > 0 ? `${h}h ${m}m` : `${m}m`;
-  };
 
   const toggleSection = (section: CustomizeSection) => {
     setOpenSection((prev) => (prev === section ? null : section));
@@ -1432,12 +1432,12 @@ export default function ProfilePage() {
 
           <Row
             label={copy.testCash}
-            value={isConnected ? `${usdmValue.toFixed(1)} USDC` : '—'}
+            value={isConnected && usdmValue !== undefined ? `${usdmValue.toFixed(1)} USDC` : '—'}
             fonts={fonts}
             C={C}
           />
 
-          {!isUSD && usdmValue > 0 ? (
+          {!isUSD && usdmValue !== undefined && usdmValue > 0 ? (
             <div
               style={{
                 fontFamily: fonts.mono,
@@ -1466,13 +1466,16 @@ export default function ProfilePage() {
               ? copy.externalNeeded
               : !isConnected
                 ? copy.connectForBalance
+                : readsFailed ? readCopy.unavailable
+                : readsLoading ? readCopy.loading
                 : needsTestCash
-                ? onCooldown
-                  ? `${copy.nextClaim} ${formatCooldown(cooldownSeconds)}.`
+                ? claimUnavailable
+                  ? readCopy.claimUnavailable
                   : copy.testCashHint
                 : copy.enoughFundsShort}
           </div>
 
+          {readsFailed ? <button type="button" onClick={() => void refetchReads()}>{readCopy.retry}</button> : null}
           {needsExternalWalletForTx ? (
             <button
               type="button"
@@ -1481,7 +1484,7 @@ export default function ProfilePage() {
             >
               {copy.connectExternal}
             </button>
-          ) : showBanner && !onCooldown ? (
+          ) : showBanner ? (
             <button
               type="button"
               onClick={() => void handleFaucetClick()}

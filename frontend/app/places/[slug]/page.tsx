@@ -48,6 +48,7 @@ import type { Metadata } from 'next';
 import { serializeJsonLd } from '@/lib/json-ld';
 import { notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { applyValidityFilter } from '@/lib/signal-engine/validity';
 import BottomNav from '@/components/design/BottomNav';
 import { buildWeatherContext } from '@/lib/place-context';
 import { getSignalComparison } from '@/lib/signal-engine/comparison';
@@ -246,15 +247,14 @@ type SsrSignal = {
  * body / attribution text in English. AI crawlers grab this verbatim.
  */
 async function getSignalsForSlug(slug: string): Promise<SsrSignal[]> {
-  const { data, error } = await supabase
-    .from('local_signals')
-    .select(
+  const { data, error } = await applyValidityFilter(
+    supabase.from('local_signals').select(
       `id, place_id, signal_type_id, status, severity, confidence,
        anomaly_score, affected_groups, source_stack, structured_data,
        valid_from, valid_until, evaluated_at,
        places!inner ( slug )`,
-    )
-    .eq('status', 'active')
+    ),
+  )
     .eq('places.slug', slug)
     .order('evaluated_at', { ascending: false });
 

@@ -24,12 +24,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { fetchDailyActuals } from './brief-actuals';
-import {
-  directionalVerdict,
-  rainNearBand,
-  verdictSpaceIsDegenerate,
-} from './verification-rules';
+import { buildCompatibleChecks, safeVerification, COMPARISON_NOTE, type ComparisonContract, type WindowEvidence } from './verification-contract';
 import { composeCard, type StoredSignal } from './composer';
+import { applyValidityFilter } from './validity';
 import { resolveSignalString } from './i18n';
 import {
   eventsForProfile,
@@ -66,11 +63,13 @@ export type VerificationCheck = {
   /** What the day actually recorded. */
   actual: number;
   unit: string;
+  comparison_contract?: ComparisonContract;
   verdict: 'above_baseline' | 'near_baseline' | 'below_baseline';
 };
 
 export type BriefVerification = {
   actuals: {
+    comparison_observations?: Record<string, WindowEvidence>;
     precipitation_sum_mm: number | null;
     temperature_max_c: number | null;
     temperature_min_c: number | null;
@@ -78,6 +77,7 @@ export type BriefVerification = {
     wind_gusts_max_kmh: number | null;
   };
   checks: VerificationCheck[];
+  comparison_status?: string;
   method: 'open-meteo-daily';
   note: string;
 };
@@ -131,15 +131,13 @@ async function snapshotSignals(
   supabase: SupabaseClient,
   placeId: string,
 ): Promise<BriefSignal[]> {
-  const { data, error } = await supabase
-    .from('local_signals')
-    .select(
+  const { data, error } = await applyValidityFilter(
+    supabase.from('local_signals').select(
       `signal_type_id, status, severity, confidence, anomaly_score,
        affected_groups, source_stack, structured_data,
        valid_from, valid_until, evaluated_at, id, place_id`,
-    )
-    .eq('place_id', placeId)
-    .eq('status', 'active')
+    ).eq('place_id', placeId),
+  )
     .order('evaluated_at', { ascending: false });
   if (error) throw new Error(`signals snapshot: ${error.message}`);
 
@@ -242,11 +240,6 @@ export async function composeBriefForPlace(
 
 // ── Verification (service role) ─────────────────────────────────────────────
 
-const VERIFICATION_NOTE =
-  'Directional single-day check: recorded daily values compared against ' +
-  'the historical baseline each signal was measured from. Signals cover ' +
-  'multi-day windows, so this is context, not a forecast grade.';
-
 type DailyActuals = BriefVerification['actuals'];
 
 /**
@@ -257,57 +250,9 @@ type DailyActuals = BriefVerification['actuals'];
 export function buildChecks(
   signals: BriefSignal[],
   actuals: DailyActuals,
+  date?: string,
 ): VerificationCheck[] {
-  const checks: VerificationCheck[] = [];
-  for (const s of signals) {
-    const sd = s.structured_data ?? {};
-    // Rain-family signals store a mm baseline median.
-    if (
-      typeof sd.baseline_median_mm === 'number' &&
-      typeof actuals.precipitation_sum_mm === 'number'
-    ) {
-      const nearBand = rainNearBand(sd.baseline_median_mm);
-      // Rainfall has a hard floor at 0mm, so a low baseline leaves no room
-      // for a miss. Skip rather than record an unfailable check.
-      if (verdictSpaceIsDegenerate(sd.baseline_median_mm, nearBand, 0)) continue;
-      checks.push({
-        signal_type_id: s.signal_type_id,
-        title: s.title,
-        metric: 'precipitation_sum',
-        baseline: sd.baseline_median_mm,
-        actual: actuals.precipitation_sum_mm,
-        unit: 'mm',
-        verdict: directionalVerdict(
-          actuals.precipitation_sum_mm,
-          sd.baseline_median_mm,
-          nearBand,
-        ),
-      });
-      continue;
-    }
-    // Heat/temperature-family signals store a °C baseline median.
-    if (
-      typeof sd.baseline_median_c === 'number' &&
-      typeof actuals.temperature_max_c === 'number'
-    ) {
-      checks.push({
-        signal_type_id: s.signal_type_id,
-        title: s.title,
-        metric: 'temperature_2m_max',
-        baseline: sd.baseline_median_c,
-        actual: actuals.temperature_max_c,
-        unit: '°C',
-        // Temperature in °C has no floor at zero, so every verdict stays
-        // reachable and no degeneracy guard is needed here.
-        verdict: directionalVerdict(
-          actuals.temperature_max_c,
-          sd.baseline_median_c,
-          1.5,
-        ),
-      });
-    }
-  }
-  return checks;
+  return buildCompatibleChecks(signals, actuals, date);
 }
 
 /**
@@ -325,15 +270,17 @@ export async function verifyBrief(
 
   const verification: BriefVerification = {
     actuals,
-    checks: buildChecks(brief.signals ?? [], actuals),
+    checks: buildChecks(brief.signals ?? [], actuals, brief.brief_date),
     method: 'open-meteo-daily',
-    note: VERIFICATION_NOTE,
+    note: COMPARISON_NOTE,
   };
+
+  const safe = safeVerification(verification, brief.brief_date)!;
 
   const { error } = await supabase
     .from('place_briefs')
     .update({
-      verification,
+      verification: safe,
       verified_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })

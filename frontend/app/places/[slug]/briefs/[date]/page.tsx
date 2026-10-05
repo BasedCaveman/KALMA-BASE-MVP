@@ -34,6 +34,7 @@ import { supabase } from '@/lib/supabase';
 import { serializeJsonLd } from '@/lib/json-ld';
 import BottomNav from '@/components/design/BottomNav';
 import { groupLabel } from '@/lib/signal-engine/group-labels';
+import { safeVerification } from '@/lib/signal-engine/verification-contract';
 import {
   isValidBriefDate,
   utcToday,
@@ -198,7 +199,9 @@ export default async function DailyBriefPage({
   const signals = brief.signals ?? [];
   const observations = brief.observations ?? { count: 0, latest: [] };
   const commodityEvents = brief.commodity_events ?? [];
-  const verification = brief.verification;
+  // Keep measured actuals visible, but suppress legacy checks without a
+  // compatible daily observation/reference contract.
+  const verification = safeVerification(brief.verification, brief.brief_date);
   const isToday = date === utcToday();
 
   // ── JSON-LD ────────────────────────────────────────────────────────────

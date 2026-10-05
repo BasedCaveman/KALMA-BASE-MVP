@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { CSSProperties } from 'react';
 import { supabase } from '@/lib/supabase';
+import { applyValidityFilter } from '@/lib/signal-engine/validity';
 import {
   composeCard,
   severityMeta,
@@ -49,15 +50,14 @@ const crawlerOnlyStyle: CSSProperties = {
 };
 
 async function getSignalsSummary(): Promise<SsrSignalSummary[]> {
-  const { data, error } = await supabase
-    .from('local_signals')
-    .select(
+  const { data, error } = await applyValidityFilter(
+    supabase.from('local_signals').select(
       `id, place_id, signal_type_id, status, severity, confidence,
        anomaly_score, affected_groups, source_stack, structured_data,
        valid_from, valid_until, evaluated_at,
        places!inner ( name, region, country, slug )`
-    )
-    .eq('status', 'active')
+    ),
+  )
     .order('evaluated_at', { ascending: false })
     .limit(12);
 

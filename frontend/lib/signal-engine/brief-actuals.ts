@@ -8,6 +8,7 @@
 // honouring Retry-After when the provider sends one.
 
 export type DailyActuals = {
+  comparison_observations?: Record<string, import('./verification-contract').WindowEvidence>;
   precipitation_sum_mm: number | null;
   temperature_max_c: number | null;
   temperature_min_c: number | null;
@@ -91,5 +92,19 @@ export async function fetchDailyActuals(
     snowfall_sum_cm: first(daily.snowfall_sum),
     wind_gusts_max_kmh: first(daily.wind_gusts_10m_max),
   };
-  return Object.values(actuals).some(value => value !== null) ? actuals : null;
+  const hasValues = Object.values(actuals).some(value => value !== null);
+  if (daily.time.length === 1 && typeof body.timezone === 'string' && body.timezone) {
+    const observations: NonNullable<DailyActuals['comparison_observations']> = {};
+    for (const [variable, unit, aggregation] of [
+      ['precipitation_sum','mm','sum'], ['temperature_2m_max','°C','max'],
+    ]) {
+      if (body.daily_units?.[variable] !== unit || daily[variable]?.length !== 1 ||
+          first(daily[variable]) === null) continue;
+      observations[variable] = {variable,unit,aggregation,duration_days:1,timezone:body.timezone,
+        start:date,end:date,sample_count:1,source:'https://api.open-meteo.com/v1/forecast',
+        method_version:'open-meteo-calendar-daily-v1',samples_complete:true};
+    }
+    if (Object.keys(observations).length) actuals.comparison_observations = observations;
+  }
+  return hasValues ? actuals : null;
 }
