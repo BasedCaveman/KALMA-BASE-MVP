@@ -8,7 +8,11 @@ const db = new PGlite();
 const route = fs.readFileSync(new URL('../app/api/eth-drip/route.ts', import.meta.url), 'utf8');
 const doc = fs.readFileSync(new URL('../../docs/MVP-DRIP-FOCAL-PREPARATION-2026-10-06.md', import.meta.url), 'utf8');
 const ddl = route.match(/sql`(CREATE TABLE[^`]+)`/)[1];
-const reserve = route.match(/sql`(INSERT INTO eth_drip_claims[^`]+)`/)[1].replaceAll('${normalized}', '$1');
+const reserveTemplate = [...route.matchAll(/sql`([^`]*eth_drip_claims[^`]*)`/g)]
+  .map(match => match[1])
+  .find(query => query.startsWith("INSERT INTO eth_drip_claims (address, status) VALUES (${normalized}, 'pending')"));
+assert.ok(reserveTemplate, 'wallet reservation SQL template exists');
+const reserve = reserveTemplate.replaceAll('${normalized}', '$1');
 const marker = doc.match(/```sql\n([\s\S]+?)\n```/)[1];
 const target = '0x4ca2701e8e4a2325c155354ea310862bfa293cbb';
 let cases = 0;
