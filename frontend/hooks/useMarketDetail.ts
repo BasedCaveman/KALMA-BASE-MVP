@@ -3,7 +3,7 @@
 import { useAccount } from '@/hooks/useWallet';
 import { useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
-import { CONTRACTS, climatePoolAbi } from '@/lib/contracts';
+import { CONTRACTS, climatePoolAbi, USDM_DECIMALS } from '@/lib/contracts';
 
 export type MarketDetailData = {
   id: bigint;
@@ -156,8 +156,8 @@ export function useMarketDetail(marketId: bigint) {
       const [uAbove, uBelow] = userPositionRead.data as [bigint, bigint, boolean];
       userAboveAmount = uAbove;
       userBelowAmount = uBelow;
-      const aboveVal = Number(formatUnits(uAbove, 18));
-      const belowVal = Number(formatUnits(uBelow, 18));
+      const aboveVal = Number(formatUnits(uAbove, USDM_DECIMALS));
+      const belowVal = Number(formatUnits(uBelow, USDM_DECIMALS));
       userPositionValue = aboveVal + belowVal;
       userHasPosition = userPositionValue > 0;
       if (aboveVal > 0) userSide = 'above';
@@ -172,9 +172,9 @@ export function useMarketDetail(marketId: bigint) {
     const threshold = Number(historicalAvg);
     const unit = isRain ? 'mm' : '°C';
 
-    const abovePoolValue = Number(formatUnits(abovePool, 18));
-    const belowPoolValue = Number(formatUnits(belowPool, 18));
-    const totalPoolValue = Number(formatUnits(abovePool + belowPool, 18));
+    const abovePoolValue = Number(formatUnits(abovePool, USDM_DECIMALS));
+    const belowPoolValue = Number(formatUnits(belowPool, USDM_DECIMALS));
+    const totalPoolValue = Number(formatUnits(abovePool + belowPool, USDM_DECIMALS));
 
     const aboveCrowdPct =
       totalPoolValue > 0 ? round0((abovePoolValue / totalPoolValue) * 100) : 50;

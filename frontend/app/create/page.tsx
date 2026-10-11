@@ -19,6 +19,7 @@ import { logPlaceCandidate } from '@/lib/place-candidate';
 import { formatUnits, parseEventLogs, parseUnits } from 'viem';
 import { useQueryClient } from '@tanstack/react-query';
 import { MARKETS_SNAPSHOT_QUERY_KEY } from '@/hooks/useMarketsSnapshot';
+import { syncMarketIndex } from '@/lib/market-index-sync';
 import { haversineKm } from '@/hooks/useMarkets';
 import ShareQuestionButton from '@/components/shared/ShareQuestionButton';
 import BottomNav from '@/components/design/BottomNav';
@@ -1933,8 +1934,8 @@ export default function CreatePage() {
     // cron, 15-min cadence) — without this, the creator's own signal stays
     // invisible for up to ~20 min. Push the new market into the snapshot now,
     // then drop the client cache so /markets shows it on the next visit.
-    fetch(`/api/markets/${newId}/refresh-snapshot`, { method: 'POST' })
-      .catch(() => undefined)
+    syncMarketIndex(Number(newId))
+      .catch(() => setStatusText('Your market is confirmed on-chain, but its listing is still syncing. Reopen the app to retry; do not create it again.'))
       .finally(() => {
         void queryClient.invalidateQueries({ queryKey: MARKETS_SNAPSHOT_QUERY_KEY });
       });
@@ -2134,6 +2135,7 @@ export default function CreatePage() {
             >
               {copy.successSubtitle}
             </p>
+            {statusText ? <p role="status" lang="en" style={{ color: C.textSoft }}>{statusText}</p> : null}
           </div>
 
           {/* The real shareable poster — exactly what unfurls in the group. */}

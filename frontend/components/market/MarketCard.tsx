@@ -682,9 +682,9 @@ function estimateReturn(params: {
   const net = gross - fee;
 
   return {
-    gross: round1(gross),
-    net: round1(net),
-    fee: round1(fee),
+    gross: Math.round(gross * 100) / 100,
+    net: Math.round(net * 100) / 100,
+    fee: Math.round(fee * 100) / 100,
   };
 }
 

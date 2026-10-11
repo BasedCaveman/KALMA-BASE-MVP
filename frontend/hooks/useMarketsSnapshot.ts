@@ -15,7 +15,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { pendingMarketIndexes, syncMarketIndex } from '@/lib/market-index-sync';
 import { useReadContracts } from 'wagmi';
 import { formatUnits } from 'viem';
 import { useAccount } from '@/hooks/useWallet';
@@ -90,6 +91,17 @@ async function fetchSnapshot(): Promise<SnapshotRow[]> {
 }
 
 export function useMarketsSnapshot(location?: LocationContextValue | null) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    const resume = () => {
+      for (const id of pendingMarketIndexes()) {
+        void syncMarketIndex(id).then(() => queryClient.invalidateQueries({ queryKey: MARKETS_SNAPSHOT_QUERY_KEY })).catch(() => { /* Keep pending for the next visit/focus; no unbounded retry. */ });
+      }
+    };
+    resume();
+    window.addEventListener('focus', resume);
+    return () => window.removeEventListener('focus', resume);
+  }, [queryClient]);
   const { address } = useAccount();
   const [favoriteIds, setFavoriteIds] = useState<string[]>([]);
 
