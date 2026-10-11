@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useAccount } from '@/hooks/useWallet';
 import { useReadContract, useReadContracts } from 'wagmi';
 import { formatUnits } from 'viem';
-import { CHAIN, CONTRACTS, climatePoolAbi, MARKET_TYPES } from '@/lib/contracts';
+import { CHAIN, CONTRACTS, climatePoolAbi, MARKET_TYPES, USDM_DECIMALS } from '@/lib/contracts';
 import { marketReadStatus } from '@/lib/contract-read-state';
 import {
   deriveMarketUiState,
@@ -20,7 +20,7 @@ import type { LocationContextValue } from '@/lib/location';
 // helpers — no divergence between chain-rendered and snapshot-rendered cards.
 export const FAVORITES_STORAGE_KEY = 'kalma-favorite-markets';
 export const EXAMPLE_STAKE = 10;
-export const TOKEN_DECIMALS = 18;
+export const TOKEN_DECIMALS = USDM_DECIMALS;
 const PUBLIC_MARKET_REFETCH_MS = 60 * 60 * 1000;
 const PUBLIC_MARKET_STALE_MS = 5 * 60 * 1000;
 const PUBLIC_MARKET_GC_MS = 60 * 60 * 1000;

@@ -6,6 +6,8 @@ const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const card = fs.readFileSync(new URL('../components/market/MarketCard.tsx', import.meta.url), 'utf8');
 const detail = fs.readFileSync(new URL('../hooks/useMarketDetail.ts', import.meta.url), 'utf8');
+const markets = fs.readFileSync(new URL('../hooks/useMarkets.ts', import.meta.url), 'utf8');
+assert.ok(markets.includes('export const TOKEN_DECIMALS = USDM_DECIMALS;'), 'Browse and detail must use the same USDC decimals');
 assert.ok(!/formatUnits\([^\n]+, 18\)/.test(detail), 'Base USDC must never use 18 decimals');
 assert.equal((detail.match(/formatUnits\([^\n]+, USDM_DECIMALS\)/g) ?? []).length, 5);
 const fn = card.slice(card.indexOf('function estimateReturn('), card.indexOf('function durationDaysFromMarket('));
